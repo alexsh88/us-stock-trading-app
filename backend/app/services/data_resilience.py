@@ -20,8 +20,19 @@ def _get_breaker(name: str):
         return _breakers[name]
     try:
         import pybreaker
-        from app.agents.cache_utils import _sync_redis
-        r = _sync_redis()
+        # pybreaker.CircuitRedisStorage expects bytes from Redis (calls .decode() on values).
+        # Must NOT use decode_responses=True — create a dedicated bytes client here.
+        r = None
+        try:
+            import redis as _redis
+            from app.config import get_settings
+            r = _redis.from_url(
+                get_settings().redis_url,
+                decode_responses=False,  # pybreaker needs bytes, not str
+                socket_connect_timeout=2,
+            )
+        except Exception:
+            pass
         if r:
             storage = pybreaker.CircuitRedisStorage(pybreaker.STATE_CLOSED, r, namespace=f"cb:{name}")
         else:

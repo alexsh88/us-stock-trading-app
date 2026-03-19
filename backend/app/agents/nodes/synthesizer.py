@@ -167,6 +167,13 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
     if not tickers:
         return {"trade_signals": [], "errors": []}
 
+    # Short-circuit when market regime blocks all entries (bear market gate)
+    regime = state.get("market_regime", {})
+    if not regime.get("entry_allowed", True):
+        reason = regime.get("reason", "regime gate")
+        logger.info("Synthesizer skipped — regime blocks entries", reason=reason)
+        return {"trade_signals": [], "errors": [f"regime_blocked: {reason}"]}
+
     try:
         import yfinance as yf
         from app.config import get_settings, has_anthropic_key
