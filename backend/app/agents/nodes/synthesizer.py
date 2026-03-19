@@ -245,8 +245,15 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
             cat = state.get("catalyst_scores", {}).get(t, {}).get("score", 0.0)
             return tech * w_tech + fund * w_fund + sent * w_sent + cat * w_cat
 
-        # Pre-filter: only send top candidates to the LLM (top_n * 2, max 15)
-        top_candidates = sorted(tickers, key=composite_score, reverse=True)[:min(top_n * 2, 15)]
+        # Pre-filter: rank by composite score and send the best candidates to the LLM.
+        # For custom watchlists the user hand-picked every ticker, so raise the ceiling
+        # significantly (up to 40) to avoid silently discarding most of their list.
+        # For screener mode keep the tighter cap (top_n * 2, max 15) to control cost.
+        if state.get("watchlist_active"):
+            pre_filter_cap = min(len(tickers), 40)
+        else:
+            pre_filter_cap = min(top_n * 2, 15)
+        top_candidates = sorted(tickers, key=composite_score, reverse=True)[:pre_filter_cap]
 
         # Batch-fetch prices for all candidates in one call — with fallback
         prices: dict[str, float] = {}
