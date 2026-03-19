@@ -47,11 +47,13 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
         logger.info("Regime sizing reduction applied", multiplier=regime_sizing, reason=regime.get("reason", ""))
 
     try:
-        # Batch download all tickers at once
-        all_hist = yf.download(
-            tickers, period="1mo", interval="1d",
-            progress=False, auto_adjust=True, group_by="ticker"
-        )
+        # Batch download all tickers — with circuit breaker fallback chain
+        from app.services.data_resilience import fetch_ohlcv_with_fallback
+        all_hist, data_source = fetch_ohlcv_with_fallback(tickers, period="1mo")
+        if all_hist is None:
+            return {"risk_metrics": {}, "errors": ["risk_manager: all data sources failed"]}
+        if data_source != "yfinance":
+            logger.info("Risk manager using fallback data source", source=data_source)
 
         metrics: dict[str, Any] = {}
 

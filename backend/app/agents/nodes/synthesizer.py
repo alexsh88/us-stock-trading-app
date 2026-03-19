@@ -191,19 +191,18 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
         # Pre-filter: only send top candidates to the LLM (top_n * 2, max 15)
         top_candidates = sorted(tickers, key=composite_score, reverse=True)[:min(top_n * 2, 15)]
 
-        # Batch-fetch prices for all candidates in one call
+        # Batch-fetch prices for all candidates in one call — with fallback
         prices: dict[str, float] = {}
         try:
-            hist_all = yf.download(
-                top_candidates, period="5d", interval="1d",
-                progress=False, auto_adjust=True, group_by="ticker"
-            )
-            for t in top_candidates:
-                try:
-                    close = hist_all[t]["Close"].dropna()
-                    prices[t] = float(close.iloc[-1].item()) if not close.empty else 100.0
-                except Exception:
-                    prices[t] = 100.0
+            from app.services.data_resilience import fetch_ohlcv_with_fallback
+            hist_all, _ = fetch_ohlcv_with_fallback(top_candidates, period="5d")
+            if hist_all is not None:
+                for t in top_candidates:
+                    try:
+                        close = hist_all[t]["Close"].dropna()
+                        prices[t] = float(close.iloc[-1].item()) if not close.empty else 100.0
+                    except Exception:
+                        prices[t] = 100.0
         except Exception:
             prices = {t: 100.0 for t in top_candidates}
 

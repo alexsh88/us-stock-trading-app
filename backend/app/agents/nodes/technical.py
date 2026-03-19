@@ -252,11 +252,13 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         from app.config import has_anthropic_key
 
-        # Batch download daily (3mo) for all indicators
-        all_data = yf.download(
-            tickers, period="3mo", interval="1d",
-            progress=False, auto_adjust=True, group_by="ticker"
-        )
+        # Batch download daily (3mo) for all indicators — with fallback chain
+        from app.services.data_resilience import fetch_ohlcv_with_fallback
+        all_data, data_source = fetch_ohlcv_with_fallback(tickers, period="3mo")
+        if all_data is None:
+            return {"technical_scores": {}, "errors": ["technical: all data sources failed"]}
+        if data_source != "yfinance":
+            logger.info("Technical node using fallback data source", source=data_source)
 
         # Batch download weekly (1y) for MTF 20-week SMA
         all_weekly = yf.download(

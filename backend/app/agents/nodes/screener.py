@@ -174,15 +174,14 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         all_tickers = CANDIDATE_UNIVERSE  # includes SPY
-        # Batch download all tickers in one request — much faster, fewer rate-limit hits
-        all_data = yf.download(
-            all_tickers,
-            period="1mo",
-            interval="1d",
-            progress=False,
-            auto_adjust=True,
-            group_by="ticker",
-        )
+        # Batch download all tickers — with circuit breaker fallback chain
+        from app.services.data_resilience import fetch_ohlcv_with_fallback
+        all_data, data_source = fetch_ohlcv_with_fallback(all_tickers, period="1mo")
+        if all_data is None:
+            return {"candidate_tickers": [], "market_regime": regime,
+                    "errors": ["screener: all data sources failed"]}
+        if data_source != "yfinance":
+            logger.info("Screener using fallback data source", source=data_source)
 
         # Extract SPY for RS benchmark
         try:
