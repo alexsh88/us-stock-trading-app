@@ -50,6 +50,9 @@ class TradeSignal(Base):
     # Rich technical metadata: adx, regime, mtf_aligned, bb_squeeze, breakout_score, etc.
     indicators: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
+    # Chart pattern detection results (all bullish/bearish patterns found for this ticker)
+    detected_patterns: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     run: Mapped["AnalysisRun"] = relationship("AnalysisRun", back_populates="signals")  # type: ignore[name-defined]

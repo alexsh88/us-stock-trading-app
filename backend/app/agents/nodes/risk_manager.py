@@ -91,12 +91,23 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                 if atr == 0 or current_price == 0:
                     continue
 
-                # Stop loss: Chandelier Exit for swing (ratcheting), plain ATR for intraday
-                if mode == "swing":
+                # ── Stop loss priority ────────────────────────────────────────────
+                # 1. Pattern-specific stop (if pattern detected with strength ≥ 0.65)
+                # 2. Chandelier Exit (swing mode)
+                # 3. ATR-based stop (fallback / intraday)
+                tech = state.get("technical_scores", {}).get(ticker, {})
+                pat_stop     = tech.get("pattern_stop")
+                pat_target   = tech.get("pattern_target")
+                pat_strength = tech.get("pattern_strength", 0.0)
+                pat_name     = tech.get("pattern_name")
+
+                if pat_stop and pat_strength >= 0.65 and pat_stop < current_price:
+                    stop_loss_price = round(pat_stop, 2)
+                    stop_method = f"Pattern-{pat_name}(str={pat_strength:.2f})"
+                elif mode == "swing":
                     chandelier = calculate_chandelier_stop(hist, period=10, multiplier=2.5)
                     atr_stop = round(current_price - atr * atr_multiplier, 2)
                     if chandelier and chandelier > atr_stop:
-                        # Chandelier is tighter (less risk) — prefer it
                         stop_loss_price = chandelier
                         stop_method = f"Chandelier-2.5x (ATR={atr:.3f})"
                     else:
@@ -107,6 +118,12 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                     stop_method = f"ATR-{atr_multiplier}x (ATR={atr:.3f})"
 
                 stop_distance = current_price - stop_loss_price
+                if stop_distance <= 0:
+                    # Degenerate case — fall back to ATR stop
+                    stop_loss_price = round(current_price - atr * atr_multiplier, 2)
+                    stop_method = f"ATR-{atr_multiplier}x (ATR={atr:.3f})"
+                    stop_distance = current_price - stop_loss_price
+
                 # Minimum target = entry + (stop_distance × min_rr)
                 min_target_price = round(current_price + stop_distance * min_rr, 2)
 
@@ -114,23 +131,26 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                 avg_win = stop_distance * min_rr
                 kelly_pct = kelly_position_size(0.50, avg_win, stop_distance)
 
-                # Pass swing_resistance from technical_scores as the preferred target anchor
-                tech = state.get("technical_scores", {}).get(ticker, {})
                 swing_resistance = tech.get("swing_resistance")
 
-                # Use swing resistance as target if it gives better R:R than minimum
-                if swing_resistance and swing_resistance > current_price:
+                # ── Target priority ───────────────────────────────────────────────
+                # 1. Pattern-specific target (if strong pattern and it gives ≥ min R:R)
+                # 2. Swing resistance (if it gives ≥ min R:R)
+                # 3. Minimum R:R target
+                target_price = min_target_price
+                target_rr = min_rr
+
+                if pat_target and pat_strength >= 0.65 and pat_target > current_price:
+                    pat_rr = (pat_target - current_price) / stop_distance
+                    if pat_rr >= min_rr:
+                        target_price = round(pat_target, 2)
+                        target_rr = round(pat_rr, 2)
+
+                if target_price == min_target_price and swing_resistance and swing_resistance > current_price:
                     resist_rr = (swing_resistance - current_price) / stop_distance
                     if resist_rr >= min_rr:
                         target_price = round(swing_resistance, 2)
                         target_rr = round(resist_rr, 2)
-                    else:
-                        # Resistance too close — use minimum R:R target
-                        target_price = min_target_price
-                        target_rr = min_rr
-                else:
-                    target_price = min_target_price
-                    target_rr = min_rr
 
                 # Apply regime multiplier to position size
                 regime_adjusted_pct = round(kelly_pct * regime_sizing, 2)
@@ -145,6 +165,8 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                     "stop_loss_method": stop_method,
                     "min_rr": min_rr,
                     "regime_sizing": regime_sizing,
+                    "pattern_name": pat_name,
+                    "pattern_strength": pat_strength,
                 }
 
             except Exception as e:

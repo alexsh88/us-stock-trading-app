@@ -91,6 +91,17 @@ def _build_ticker_block(ticker: str, state: dict[str, Any], current_price: float
     resist_str = f"${resist:.2f}" if resist else "none"
     support_str = f"${support:.2f}" if support else "none"
 
+    # Pattern line
+    pat_name     = tech.get("pattern_name")
+    pat_strength = tech.get("pattern_strength", 0.0)
+    pat_pivot    = tech.get("pattern_pivot")
+    pat_details  = tech.get("pattern_details", "")
+    if pat_name:
+        pivot_str = f", pivot=${pat_pivot:.2f}" if pat_pivot else ""
+        pattern_line = f"\nPattern: {pat_name}(strength={pat_strength:.2f}{pivot_str}) | {pat_details[:120]}"
+    else:
+        pattern_line = "\nPattern: none"
+
     hist_context = _fetch_historical_context(ticker, state)
 
     return (
@@ -101,6 +112,7 @@ def _build_ticker_block(ticker: str, state: dict[str, Any], current_price: float
         f"Catalyst: {cat.get('score', 0.5):.2f} | {cat.get('reasoning', 'N/A')[:80]}\n"
         f"Risk: Stop={stop_str} | MinTarget={target_str} (R:R={rr_str}) | Size={risk.get('position_size_pct', 2.0):.1f}% | {risk.get('stop_loss_method', 'ATR-2x')}\n"
         f"Levels: Resistance={resist_str} | Support={support_str} | Min R:R required={min_rr:.1f}x"
+        f"{pattern_line}"
         f"{hist_context}"
     )
 
@@ -162,6 +174,16 @@ def _parse_batch_response(text: str, state: dict[str, Any], prices: dict[str, fl
             cat = state.get("catalyst_scores", {}).get(ticker, {})
             risk = state.get("risk_metrics", {}).get(ticker, {})
 
+            # Serialise all detected patterns for DB storage
+            from app.agents.patterns.detector import pattern_to_dict
+            pat_results = tech.get("_pattern_results", {})
+            detected_patterns = {
+                "best_bullish": pattern_to_dict(pat_results["best_bullish"]) if pat_results.get("best_bullish") else None,
+                "best_bearish": pattern_to_dict(pat_results["best_bearish"]) if pat_results.get("best_bearish") else None,
+                "all_bullish": [pattern_to_dict(r) for r in pat_results.get("all_bullish", [])],
+                "all_bearish": [pattern_to_dict(r) for r in pat_results.get("all_bearish", [])],
+            }
+
             signals.append({
                 "ticker": ticker,
                 "decision": decision,
@@ -179,6 +201,7 @@ def _parse_batch_response(text: str, state: dict[str, Any], prices: dict[str, fl
                 "catalyst_score": cat.get("score", 0.5),
                 "key_risks": risks,
                 "reasoning": reasoning,
+                "detected_patterns": detected_patterns,
             })
         except Exception:
             continue
@@ -302,6 +325,14 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
                 stop_price  = risk.get("stop_loss_price",  round(current_price * 0.95, 2))
                 target_price = risk.get("take_profit_price", round(current_price * 1.10, 2))
                 rr = risk.get("risk_reward_ratio", 2.0)
+                from app.agents.patterns.detector import pattern_to_dict
+                pat_results = tech.get("_pattern_results", {})
+                detected_patterns = {
+                    "best_bullish": pattern_to_dict(pat_results["best_bullish"]) if pat_results.get("best_bullish") else None,
+                    "best_bearish": pattern_to_dict(pat_results["best_bearish"]) if pat_results.get("best_bearish") else None,
+                    "all_bullish": [pattern_to_dict(r) for r in pat_results.get("all_bullish", [])],
+                    "all_bearish": [pattern_to_dict(r) for r in pat_results.get("all_bearish", [])],
+                }
                 signals.append({
                     "ticker": ticker,
                     "decision": "BUY",
@@ -319,6 +350,7 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
                     "catalyst_score": cat.get("score", 0.5),
                     "key_risks": ["Rule-based fallback — no LLM configured"],
                     "reasoning": f"Composite score: {comp:.2f}. Configure ANTHROPIC_API_KEY for full analysis.",
+                    "detected_patterns": detected_patterns,
                 })
 
         # ── Portfolio heat cap: max 15% total risk across all new signals ─────────

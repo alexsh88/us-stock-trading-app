@@ -15,6 +15,7 @@ Breakout score 3/3 = high-conviction breakout (level + volume + RSI all confirme
 Short%Float: >25% = crowded short (both squeeze risk AND strong bearish consensus — be cautious). DTC>10 = illiquid short squeeze scenario.
 EMA150_pct: distance above/below 150-day EMA (Weinstein Stage 2). +5 to +15% = healthy uptrend. Above +25% = overextended, higher pullback risk. Negative = Stage 3/4 downtrend, avoid longs.
 Streak: consecutive up(+) or down(-) days. In CHOPPY regime, Streak>=+5 combined with RSI>65 or price near resistance = high mean-reversion risk, penalise. In TRENDING regime (ADX>25), a long up streak is momentum confirmation, NOT a sell signal on its own.
+Pattern: named chart pattern detected (e.g. BullFlag, CupHandle, InvH&S, VCP, DblBottom, AscTriangle). Strength 0-1. A strong pattern (≥0.70) with a defined pivot is a high-conviction entry signal — reward with +0.10 to +0.15 score bonus. No pattern = neutral.
 Respond with one line per stock: TICKER|SCORE|REASONING (max 100 chars reasoning).
 
 Examples (use the full 0.0-1.0 range):
@@ -22,7 +23,8 @@ NVDA|0.88|Trending ADX=34, MTF aligned, BB squeeze released, breakout 3/3, RSI=6
 XOM|0.29|Choppy ADX=15, MTF misaligned (weekly downtrend), no squeeze, breakout 0/3
 MSFT|0.63|Neutral ADX=22, MTF aligned, squeeze building 4 bars, breakout 1/3, EMA150=+8%
 APA|0.44|Trending but Streak=+7d, EMA150=+29% overextended, RSI=74 overbought — wait for pullback
-GME|0.19|Choppy ADX=12, MTF misaligned, vol declining, breakout 0/3, avoid"""
+GME|0.19|Choppy ADX=12, MTF misaligned, vol declining, breakout 0/3, avoid
+AAPL|0.82|Trending ADX=31, MTF aligned, CupHandle(str=0.78,pivot=$185.50) near pivot, breakout 2/3"""
 
 
 def _calc_streak(close: pd.Series) -> int:
@@ -389,6 +391,24 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                     continue
                 ind = _calc_indicators(hist)
 
+                # Chart pattern detection
+                try:
+                    from app.agents.patterns.detector import detect_all_patterns
+                    pat = detect_all_patterns(hist)
+                    bp = pat.get("best_bullish")
+                    ind["pattern_name"]     = bp.name     if bp else None
+                    ind["pattern_strength"] = bp.strength if bp else 0.0
+                    ind["pattern_pivot"]    = bp.pivot     if bp else None
+                    ind["pattern_stop"]     = bp.pattern_stop   if bp else None
+                    ind["pattern_target"]   = bp.pattern_target if bp else None
+                    ind["pattern_details"]  = bp.details   if bp else None
+                    # Keep full result set for downstream nodes
+                    ind["_pattern_results"] = pat
+                except Exception:
+                    ind["pattern_name"] = None
+                    ind["pattern_strength"] = 0.0
+                    ind["_pattern_results"] = {}
+
                 # Overlay DB pre-computed values for warm tickers — overrides the
                 # pandas-computed sma20/vwap/ema150 with the authoritative DB values.
                 if ticker in precomputed:
@@ -495,6 +515,13 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                     )
                     streak = ind.get("streak", 0)
                     streak_str = f"{streak:+d}d" if streak != 0 else "0d"
+                    pat_name = ind.get("pattern_name")
+                    pat_str = (
+                        f"{pat_name}(str={ind['pattern_strength']:.2f}"
+                        + (f",pivot=${ind['pattern_pivot']:.2f}" if ind.get("pattern_pivot") else "")
+                        + ")"
+                        if pat_name else "none"
+                    )
                     lines.append(
                         f"{ticker}: RSI={ind['rsi']:.1f}, MACD={'bull' if ind['macd_hist'] > 0 else 'bear'}, "
                         f"ATR%={ind['atr_pct']:.1f}%, ADX={ind['adx']:.1f}({ind['regime']}), "
@@ -505,7 +532,8 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                         f"MTF={'yes' if ind['mtf_aligned'] else 'no'}, "
                         f"NR7={'yes' if ind.get('nr7') else 'no'}, "
                         f"Short%/DTC={short_str}, "
-                        f"EMA150={ema150_str}, Streak={streak_str}"
+                        f"EMA150={ema150_str}, Streak={streak_str}, "
+                        f"Pattern={pat_str}"
                     )
 
                 if mode == "intraday":
@@ -659,6 +687,13 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                 "nr7": ind.get("nr7", False),
                 "ema150_pct": ind.get("ema150_pct"),
                 "streak": ind.get("streak", 0),
+                "pattern_name": ind.get("pattern_name"),
+                "pattern_strength": ind.get("pattern_strength", 0.0),
+                "pattern_pivot": ind.get("pattern_pivot"),
+                "pattern_stop": ind.get("pattern_stop"),
+                "pattern_target": ind.get("pattern_target"),
+                "pattern_details": ind.get("pattern_details"),
+                "_pattern_results": ind.get("_pattern_results", {}),
             })
 
         logger.info("Technical node complete", tickers_analyzed=len(scores))

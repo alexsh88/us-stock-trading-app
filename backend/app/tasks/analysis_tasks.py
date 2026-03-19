@@ -112,6 +112,7 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_to
                     reasoning=sig_data.get("reasoning", ""),
                     is_paper=True,
                     indicators=indicators,
+                    detected_patterns=sig_data.get("detected_patterns"),
                 )
                 session.add(signal)
 
