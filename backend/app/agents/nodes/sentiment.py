@@ -44,6 +44,14 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
         except Exception as e:
             logger.warning("ApeWisdom fetch failed", error=str(e))
 
+        # Fetch IBKR news headlines (free providers: Briefing.com + Dow Jones)
+        ibkr_headlines: dict[str, list[str]] = {}
+        try:
+            from app.services.ibkr_news_service import fetch_ibkr_news
+            ibkr_headlines = fetch_ibkr_news(tickers)
+        except Exception as e:
+            logger.debug("IBKR news fetch skipped", error=str(e))
+
         # Fetch Finnhub company-news headlines (last 5 days) — actual headlines beat aggregate scores
         from datetime import date, timedelta
         news_data: dict[str, dict] = {}
@@ -105,8 +113,17 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
                     rd = reddit_data.get(ticker, {})
                     nd = news_data.get(ticker, {})
                     ns = nd.get("sentiment_delta", 0.0)
-                    headlines = nd.get("headlines", [])
-                    headline_str = " | ".join(headlines[:3]) if headlines else "no recent news"
+                    # Merge Finnhub + IBKR headlines, deduplicate by first 40 chars
+                    finnhub_h = nd.get("headlines", [])
+                    ibkr_h = ibkr_headlines.get(ticker, [])
+                    seen: set[str] = set()
+                    merged: list[str] = []
+                    for h in ibkr_h + finnhub_h:
+                        key = h[:40].lower()
+                        if key not in seen:
+                            seen.add(key)
+                            merged.append(h)
+                    headline_str = " | ".join(merged[:4]) if merged else "no recent news"
                     lines.append(
                         f"{ticker}: News_sentiment={ns:+.2f}, Headlines: {headline_str} | "
                         f"Reddit_mentions={rd.get('mentions', 0)}, Reddit_sentiment={rd.get('sentiment', 0.0):+.2f}"

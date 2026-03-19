@@ -39,6 +39,24 @@ class Settings(BaseSettings):
     # Rate limits
     finnhub_requests_per_minute: int = 60
 
+    # FRED (macro data — free API key at fred.stlouisfed.org)
+    fred_api_key: str = ""
+
+    # Twelve Data (price data backup — free 800/day at twelvedata.com)
+    twelve_data_api_key: str = ""
+
+    # Tiingo (price data backup — free 1000/day at tiingo.com)
+    tiingo_api_key: str = ""
+
+    # Alpaca (free real-time data via paper account at alpaca.markets)
+    alpaca_api_key: str = ""
+    alpaca_secret_key: str = ""
+
+    # LangSmith tracing (free 5000 traces/mo at smith.langchain.com)
+    langchain_api_key: str = ""
+    langchain_project: str = "us-stock-trading-app"
+    langchain_tracing: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -53,4 +71,14 @@ def has_anthropic_key() -> bool:
 
 def has_finnhub_key() -> bool:
     key = get_settings().finnhub_api_key
+    return bool(key) and not key.startswith("your_") and len(key) > 8
+
+
+def has_fred_key() -> bool:
+    key = get_settings().fred_api_key
+    return bool(key) and not key.startswith("your_") and len(key) > 8
+
+
+def has_twelve_data_key() -> bool:
+    key = get_settings().twelve_data_api_key
     return bool(key) and not key.startswith("your_") and len(key) > 8

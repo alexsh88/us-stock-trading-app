@@ -39,8 +39,25 @@ CANDIDATE_UNIVERSE = [
 ]
 
 
+def _get_credit_spread() -> float | None:
+    """Fetch HY-IG credit spread from FRED (ICE BofA). Returns spread in basis points or None."""
+    try:
+        from app.config import has_fred_key, get_settings
+        if not has_fred_key():
+            return None
+        from fredapi import Fred
+        fred = Fred(api_key=get_settings().fred_api_key)
+        hy = fred.get_series("BAMLH0A0HYM2", observation_start="2020-01-01")
+        ig = fred.get_series("BAMLC0A0CM", observation_start="2020-01-01")
+        spread = float((hy - ig).dropna().iloc[-1])
+        return round(spread, 2)
+    except Exception as e:
+        logger.debug("FRED credit spread fetch failed", error=str(e))
+        return None
+
+
 def _get_market_regime() -> dict:
-    """Compute VIX level and SPY trend to determine overall market regime.
+    """Compute VIX level, SPY trend, and credit spread to determine overall market regime.
     Returns regime dict with sizing_multiplier, entry_allowed, and details.
     """
     try:
@@ -81,15 +98,27 @@ def _get_market_regime() -> dict:
                 sizing_multiplier *= 0.5
                 reason += f"; SPY down {spy_daily_change*100:.1f}% today"
 
+        # Credit spread regime: widen = risk-off, reduce sizing
+        credit_spread = _get_credit_spread()
+        if credit_spread is not None:
+            if credit_spread > 500:  # HY-IG spread > 500 bps = severe stress
+                sizing_multiplier *= 0.5
+                reason += f"; credit stress HY-IG={credit_spread:.0f}bps"
+            elif credit_spread > 350:  # elevated
+                sizing_multiplier *= 0.75
+                reason += f"; elevated credit spread HY-IG={credit_spread:.0f}bps"
+
         logger.info("Market regime", regime=regime, vix=round(vix_level, 1),
                     spy_vs_ma200=round((spy_last / spy_ma200 - 1) * 100, 2),
-                    sizing_multiplier=round(sizing_multiplier, 2))
+                    sizing_multiplier=round(sizing_multiplier, 2),
+                    credit_spread=credit_spread)
         return {
             "regime": regime,
             "sizing_multiplier": round(sizing_multiplier, 3),
             "entry_allowed": entry_allowed,
             "vix": round(vix_level, 2),
             "spy_vs_ma200_pct": round((spy_last / spy_ma200 - 1) * 100, 2),
+            "credit_spread_bps": credit_spread,
             "reason": reason,
         }
     except Exception as e:
@@ -214,7 +243,7 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
                 # (George & Hwang 2004: stocks near 52-week high have stronger momentum continuation)
                 try:
                     hist_52w = yf.download(ticker, period="1y", interval="1d", progress=False, auto_adjust=True)
-                    high_52w = float(hist_52w["High"].max()) if not hist_52w.empty else current_price
+                    high_52w = float(hist_52w["High"].max().squeeze()) if not hist_52w.empty else current_price
                 except Exception:
                     high_52w = current_price
                 price_vs_52wk = current_price / high_52w

@@ -243,7 +243,8 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
                 response = client.messages.create(
                     model="claude-sonnet-4-6",
                     max_tokens=max_tokens,
-                    system=SYNTHESIZER_SYSTEM,
+                    system=[{"type": "text", "text": SYNTHESIZER_SYSTEM,
+                              "cache_control": {"type": "ephemeral"}}],
                     messages=[{"role": "user", "content": prompt}],
                 )
                 signals = _parse_batch_response(response.content[0].text, state, prices)

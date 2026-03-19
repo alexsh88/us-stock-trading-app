@@ -29,6 +29,7 @@ def call_llm_batched(
     prompt_prefix: str,
     model: str = "claude-haiku-4-5-20251001",
     tokens_per_line: int = 80,
+    use_prompt_cache: bool = True,
 ) -> str:
     """
     Call the Anthropic API with automatic batching if needed.
@@ -68,10 +69,17 @@ def call_llm_batched(
     for chunk in chunks:
         max_tokens = min(len(chunk) * tokens_per_line + OUTPUT_BUFFER, HAIKU_MAX_OUTPUT)
         prompt = prompt_prefix + "\n".join(chunk)
+        # Use prompt caching for static system prompts (saves ~90% on cached tokens).
+        # Anthropic ignores cache_control if the prompt is below the minimum threshold
+        # (1024 tokens for Haiku), so this is always safe to enable.
+        system_param = (
+            [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+            if use_prompt_cache else system
+        )
         response = client.messages.create(  # type: ignore[attr-defined]
             model=model,
             max_tokens=max_tokens,
-            system=system,
+            system=system_param,
             messages=[{"role": "user", "content": prompt}],
         )
         results.append(response.content[0].text.strip())

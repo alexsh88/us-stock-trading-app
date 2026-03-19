@@ -11,6 +11,7 @@ logger = structlog.get_logger()
 CATALYST_SYSTEM = """You are a catalyst analyst. Score each stock 0.0-1.0 for near-term catalyst strength.
 8-K filings = material events (earnings beats, product launches, M&A). Form 4 = insider buying/selling.
 Note: Only insider PURCHASES (not options exercises) are bullish. Director selling = ignore; CEO buying = strong signal.
+NegativeEvent8K=YES means an auditor change (item 4.01) or goodwill impairment (item 2.06) was filed — score < 0.25.
 Activist13D=YES means a >5% activist stake was disclosed — strongly bullish (price target pressure, strategic review).
 PutCallRatio: >1.5 = bearish options sentiment (reduce score); <0.7 = bullish options positioning (add to score).
 Respond with one line per stock: TICKER|SCORE|REASONING (max 100 chars reasoning).
@@ -20,7 +21,7 @@ NVDA|0.87|3 recent 8-K filings (partnerships), CEO bought $2M shares, no negativ
 KSS|0.18|0 positive 8-K, CFO sold $500K shares, negative news cycle; no upcoming catalyst
 META|0.65|1 8-K (product announcement), no insider activity, upcoming earnings = binary risk
 AAPL|0.55|No recent 8-K filings, routine Form 4 exercises only, quiet catalyst environment
-SMCI|0.30|Accounting restatement 8-K filed, insider selling pattern; catalyst is negative
+SMCI|0.22|NegativeEvent8K=auditor dismissed; accounting risk overrides all other signals
 DLTR|0.78|Activist13D filed (Starboard Value), high bullish options positioning (PC=0.55)"""
 
 # SEC EDGAR requires a descriptive User-Agent with contact info
@@ -67,7 +68,10 @@ def _fetch_edgar_filings(ticker: str, cik: int, days: int = 7) -> dict:
         forms = recent.get("form", [])
         dates = recent.get("filingDate", [])
         k8 = f4 = activist = 0
-        for form, ds in zip(forms, dates):
+        negative_8k = False  # item 4.01 (auditor change) or 2.06 (goodwill impairment)
+        accession_numbers: list[str] = recent.get("accessionNumber", [])
+
+        for i, (form, ds) in enumerate(zip(forms, dates)):
             try:
                 if datetime.strptime(ds, "%Y-%m-%d").date() < cutoff:
                     continue
@@ -75,11 +79,29 @@ def _fetch_edgar_filings(ticker: str, cik: int, days: int = 7) -> dict:
                 continue
             if form == "8-K":
                 k8 += 1
+                # Check item type via EDGAR filing index for the most recent 8-K
+                if not negative_8k and i < len(accession_numbers):
+                    try:
+                        acc = accession_numbers[i].replace("-", "")
+                        idx_url = f"https://data.sec.gov/Archives/edgar/full-index/{ds[:4]}/{acc}.json"
+                        # Simpler: check items from the submission JSON items list if available
+                        items_list = recent.get("items", [])
+                        if i < len(items_list):
+                            items_str = str(items_list[i])
+                            if "4.01" in items_str or "2.06" in items_str:
+                                negative_8k = True
+                    except Exception:
+                        pass
             elif form in ("4", "4/A"):
                 f4 += 1
             elif form in ("SC 13D", "SC 13D/A"):
                 activist += 1  # Activist investor took/increased >5% stake
-        return {"edgar_8k_count": k8, "edgar_form4_count": f4, "activist_13d": activist}
+        return {
+            "edgar_8k_count": k8,
+            "edgar_form4_count": f4,
+            "activist_13d": activist,
+            "negative_8k": negative_8k,  # True = auditor change or impairment
+        }
     except Exception as e:
         logger.debug("EDGAR filings fetch failed", ticker=ticker, error=str(e))
         return {"edgar_8k_count": 0, "edgar_form4_count": 0}
@@ -161,6 +183,7 @@ def catalyst_node(state: dict[str, Any]) -> dict[str, Any]:
                 "edgar_8k_count": edgar["edgar_8k_count"],
                 "edgar_form4_count": edgar["edgar_form4_count"],
                 "activist_13d": edgar["activist_13d"],
+                "negative_8k": edgar.get("negative_8k", False),
                 "put_call_ratio": put_call_ratio,
             }
 
@@ -192,9 +215,11 @@ def catalyst_node(state: dict[str, Any]) -> dict[str, Any]:
                     earnings_str = f"in {d['earnings_days']} days" if d["has_earnings"] else ">30 days"
                     pc_str = f"{d['put_call_ratio']:.2f}" if d["put_call_ratio"] is not None else "n/a"
                     activist_str = f"YES({d['activist_13d']})" if d["activist_13d"] else "no"
+                    neg8k_str = "YES(auditor/impairment)" if d.get("negative_8k") else "no"
                     lines.append(
                         f"{ticker}: Earnings={earnings_str}, News_7d={d['news_count']}, "
-                        f"SEC_8K={d['edgar_8k_count']}, InsiderActivity={d['edgar_form4_count']}, "
+                        f"SEC_8K={d['edgar_8k_count']}, NegativeEvent8K={neg8k_str}, "
+                        f"InsiderActivity={d['edgar_form4_count']}, "
                         f"Activist13D={activist_str}, PutCallRatio={pc_str}"
                     )
 

@@ -10,6 +10,7 @@ TECHNICAL_SYSTEM = """You are a technical analysis expert. Score each stock 0.0-
 Consider the regime: in TRENDING markets (ADX>25), reward momentum; in CHOPPY markets (ADX<20), reward mean-reversion.
 MTF_ALIGNED=yes means weekly trend agrees with daily — prefer these setups.
 BB_Squeeze=yes means volatility is compressed and a breakout is imminent — bullish if combined with momentum.
+NR7=yes means today's range is the smallest of the last 7 days (Crabel) — strongest when combined with BB_Squeeze (dual volatility compression). Enter on next-session breakout above NR7 high.
 Breakout score 3/3 = high-conviction breakout (level + volume + RSI all confirmed).
 Short%Float: >25% = crowded short (both squeeze risk AND strong bearish consensus — be cautious). DTC>10 = illiquid short squeeze scenario.
 Respond with one line per stock: TICKER|SCORE|REASONING (max 100 chars reasoning).
@@ -198,6 +199,11 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
     # Volume-confirmed breakout
     breakout = _check_volume_breakout(close, high, volume, rsi, swing["swing_resistance"])
 
+    # NR7: today's high-low range is the smallest of the last 7 days
+    # Signals compressed volatility → imminent breakout (Crabel)
+    daily_ranges = (high - low).tail(7)
+    nr7 = len(daily_ranges) == 7 and float(daily_ranges.iloc[-1]) == float(daily_ranges.min())
+
     return {
         "price": current_price,
         "rsi": rsi,
@@ -211,6 +217,7 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
         "price_vs_sma": (current_price - bb_mid) / bb_mid * 100,
         "adx": adx_val,
         "regime": regime,
+        "nr7": nr7,
         **swing,
         **squeeze,
         **breakout,
@@ -354,6 +361,7 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                         f"Vol={ind['vol_ratio']:.1f}x, Resist={resist}, Support={support}, "
                         f"VWAP={'above' if ind['price'] > ind['vwap'] else 'below'}, "
                         f"MTF={'yes' if ind['mtf_aligned'] else 'no'}, "
+                        f"NR7={'yes' if ind.get('nr7') else 'no'}, "
                         f"Short%/DTC={short_str}"
                     )
 
@@ -495,6 +503,7 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                 "short_pct": ind.get("short_pct"),
                 "short_dtc": ind.get("short_dtc"),
                 "breakout_details": ind.get("breakout_details", ""),
+                "nr7": ind.get("nr7", False),
             })
 
         logger.info("Technical node complete", tickers_analyzed=len(scores))
