@@ -169,6 +169,7 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
             score_set("sentiment", ticker, entry)
 
         # Merge raw data
+        news_headlines: dict[str, list[str]] = {}
         for ticker in tickers:
             if ticker not in scores:
                 scores[ticker] = {"score": 0.5, "reasoning": "no data"}
@@ -179,9 +180,15 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
                 "reddit_mentions": rd.get("mentions", 0),
                 "reddit_sentiment": round(rd.get("sentiment", 0.0), 4),
             })
+            # Collect merged headlines for news_embeddings storage
+            finnhub_h = nd.get("headlines", [])
+            ibkr_h = ibkr_headlines.get(ticker, [])
+            merged = list({h[:80]: h for h in ibkr_h + finnhub_h}.values())[:5]
+            if merged:
+                news_headlines[ticker] = merged
 
         logger.info("Sentiment node complete", tickers_analyzed=len(scores))
-        return {"sentiment_scores": scores, "errors": []}
+        return {"sentiment_scores": scores, "news_headlines": news_headlines, "errors": []}
 
     except Exception as e:
         logger.error("Sentiment node failed", error=str(e))

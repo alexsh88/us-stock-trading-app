@@ -65,6 +65,7 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "") -> dict:
                 "catalyst_scores": {},
                 "risk_metrics": {},
                 "trade_signals": [],
+                "news_headlines": {},
                 "errors": [],
             }
 
@@ -119,6 +120,13 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "") -> dict:
             run.completed_at = datetime.now(timezone.utc)
             session.commit()
 
+            # Immediately seed SignalOutcome placeholders so nightly backtest
+            # only needs to fill in the OHLCV data (no cold-start delay)
+            _seed_signal_outcomes(session, run_id)
+
+            # Store headlines in news_embeddings for historical pattern retrieval
+            _store_news_headlines(session, final_state.get("news_headlines", {}))
+
             logger.info("Analysis run completed", run_id=run_id, signals=len(signals))
             return {"run_id": run_id, "signals": len(signals), "status": "completed"}
 
@@ -132,6 +140,84 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "") -> dict:
     finally:
         session.close()
         engine.dispose()
+
+
+def _store_news_headlines(session, news_headlines: dict) -> None:
+    """Persist raw headlines to news_embeddings table.
+    Embeddings (embedding_vec) are left NULL for now — a separate nightly job
+    can backfill them using an embedding API when one is configured.
+    """
+    if not news_headlines:
+        return
+    try:
+        from sqlalchemy import text
+        now = datetime.now(timezone.utc)
+        rows = []
+        for ticker, headlines in news_headlines.items():
+            for headline in headlines:
+                rows.append({"ticker": ticker, "headline": headline,
+                             "source": "finnhub_ibkr", "published_at": now})
+        if rows:
+            session.execute(
+                text("""
+                    INSERT INTO news_embeddings (ticker, headline, source, published_at)
+                    VALUES (:ticker, :headline, :source, :published_at)
+                    ON CONFLICT DO NOTHING
+                """),
+                rows,
+            )
+            session.commit()
+            logger.debug("News headlines stored", count=len(rows))
+    except Exception as e:
+        logger.warning("News headlines storage failed", error=str(e))
+
+
+def _seed_signal_outcomes(session, run_id: str) -> None:
+    """Create SignalOutcome placeholder rows for all BUY signals in this run.
+    The nightly backtest will fill in the actual OHLCV-based returns.
+    """
+    try:
+        import uuid as _uuid
+        from app.models.signals import TradeSignal, TradeDecision
+        from app.models.backtest import SignalOutcome
+
+        existing_ids = {row[0] for row in session.query(SignalOutcome.signal_id).all()}
+        signals = (
+            session.query(TradeSignal)
+            .filter(
+                TradeSignal.run_id == _uuid.UUID(run_id),
+                TradeSignal.decision == TradeDecision.BUY,
+            )
+            .all()
+        )
+        seeded = 0
+        for sig in signals:
+            if sig.id in existing_ids:
+                continue
+            outcome = SignalOutcome(
+                id=_uuid.uuid4(),
+                signal_id=sig.id,
+                ticker=sig.ticker,
+                signal_date=sig.created_at,
+                decision=sig.decision.value if hasattr(sig.decision, "value") else sig.decision,
+                confidence_score=sig.confidence_score,
+                entry_price=sig.entry_price,
+                stop_loss_price=sig.stop_loss_price,
+                take_profit_price=sig.take_profit_price,
+                technical_score=sig.technical_score,
+                fundamental_score=sig.fundamental_score,
+                sentiment_score=sig.sentiment_score,
+                catalyst_score=sig.catalyst_score,
+                trading_mode=sig.trading_mode.value if hasattr(sig.trading_mode, "value") else sig.trading_mode,
+                is_complete=False,
+            )
+            session.add(outcome)
+            seeded += 1
+        if seeded:
+            session.commit()
+            logger.info("Signal outcomes seeded", run_id=run_id, count=seeded)
+    except Exception as e:
+        logger.warning("Signal outcome seeding failed", error=str(e))
 
 
 # Register tasks with Celery

@@ -6,16 +6,17 @@ from typing import Any
 logger = structlog.get_logger()
 
 FUNDAMENTAL_SYSTEM = """You are a fundamental analysis expert. Score each stock 0.0-1.0 for investment attractiveness.
-EPS_Revision: analyst consensus EPS change over 4 weeks. >+3% = strong buy signal (earnings revision momentum).
-<-3% = red flag — analysts cutting estimates ahead of results.
+SUE (Standardized Unexpected Earnings): (actual_EPS - consensus) / std_dev_of_last_4_surprises.
+SUE > +2.0 = strong Post-Earnings Announcement Drift (PEAD) buy signal; < -2.0 = avoid.
+EPS_Revision: % of analysts raising vs cutting estimates. +50% = strong consensus upgrade; -50% = widespread cuts.
 Respond with one line per stock: TICKER|SCORE|REASONING (max 100 chars reasoning).
 
 Examples (use the full 0.0-1.0 range):
-NVDA|0.85|High rev growth +120%, expanding margins, strong FCF, low debt, EPS revision +8%
-KSS|0.22|Declining revenue -8%, negative FCF, high debt, shrinking margins, EPS revision -12%
-MSFT|0.74|Solid rev growth +16%, excellent margins, strong FCF, quality compounder
-LLY|0.80|Accelerating rev growth, expanding margins driven by GLP-1, strong pipeline catalysts
-HOOD|0.41|Revenue cyclical, improving but dependent on market activity, limited moat"""
+NVDA|0.88|Rev growth +120%, expanding margins, strong FCF, SUE=+3.2 (blowout beat), revisions all up
+KSS|0.19|Revenue -8%, negative FCF, high debt, SUE=-2.8 (miss), EPS revisions -60% (wide cuts)
+MSFT|0.74|Solid rev growth +16%, excellent margins, strong FCF, SUE=+1.1, slight upward revisions
+LLY|0.82|Accelerating rev on GLP-1, expanding margins, SUE=+2.4, pipeline catalysts unpriced
+HOOD|0.41|Cyclical revenue, improving but SUE=N/A, no clear revision trend"""
 
 
 def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -26,28 +27,49 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         from app.config import has_anthropic_key
 
-        # Fetch earnings revision data from Finnhub (4-week consensus EPS change)
+        # Fetch SUE (Standardized Unexpected Earnings) + revision direction from Finnhub
         from app.config import has_finnhub_key, get_settings
-        eps_revisions: dict[str, float | None] = {}
+        sue_data: dict[str, dict] = {}  # {ticker: {sue, eps_revision_pct}}
         if has_finnhub_key():
             try:
                 import finnhub
+                import statistics
                 fh = finnhub.Client(api_key=get_settings().finnhub_api_key)
                 for ticker in tickers:
+                    result: dict = {"sue": None, "eps_revision_pct": None}
                     try:
-                        # Get current and 4-week-ago EPS estimates
+                        # SUE = (actual - estimate) / std_dev_of_last_4_surprises
+                        earnings = fh.company_earnings(ticker, limit=5)
+                        if earnings and len(earnings) >= 1:
+                            latest = earnings[0]
+                            actual = latest.get("actual")
+                            estimate = latest.get("estimate")
+                            if actual is not None and estimate is not None:
+                                surprises = [
+                                    e["actual"] - e["estimate"]
+                                    for e in earnings[:4]
+                                    if e.get("actual") is not None and e.get("estimate") is not None
+                                ]
+                                if len(surprises) >= 2:
+                                    std = statistics.stdev(surprises)
+                                    result["sue"] = round((actual - estimate) / std, 2) if std > 0 else None
+                                elif surprises:
+                                    # fallback: raw surprise % / 10 as proxy
+                                    sp = latest.get("surprisePercent")
+                                    result["sue"] = round(sp / 10.0, 2) if sp is not None else None
+
+                        # EPS revision direction: revsUp vs revsDown from consensus estimates
                         estimates = fh.earnings_estimates(ticker, freq="quarterly")
                         if estimates and estimates.get("data"):
-                            rows = estimates["data"]
-                            if rows:
-                                current = rows[0].get("epsAvg")
-                                # Finnhub estimate history — compare revsUp vs revsDown as proxy
-                                trend = fh.recommendation_trends(ticker)
-                                if trend and current:
-                                    # Use epsAvg change as revision proxy when history is available
-                                    eps_revisions[ticker] = None  # placeholder
+                            row = estimates["data"][0]
+                            revs_up = row.get("revsUp", 0) or 0
+                            revs_down = row.get("revsDown", 0) or 0
+                            total = revs_up + revs_down
+                            if total > 0:
+                                result["eps_revision_pct"] = round((revs_up - revs_down) / total * 100, 1)
                     except Exception:
-                        eps_revisions[ticker] = None
+                        pass
+                    sue_data[ticker] = result
             except Exception:
                 pass
 
@@ -66,14 +88,12 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
                 mcap = info.get("marketCap")
                 fcf_yield = (fcf / mcap) if (fcf and mcap) else None
                 # epsForward change = earnings revision proxy from yfinance
-                eps_fwd = info.get("forwardEps")
-                eps_trail = info.get("trailingEps")
-                eps_revision = eps_revisions.get(ticker)
+                sue = sue_data.get(ticker, {})
                 raw[ticker] = {
                     "pe": pe, "fpe": fpe, "rev_growth": rev_growth,
                     "margin": margin, "de": de, "cr": cr, "fcf_yield": fcf_yield,
-                    "eps_fwd": eps_fwd, "eps_trail": eps_trail,
-                    "eps_revision": eps_revision,
+                    "sue": sue.get("sue"),
+                    "eps_revision_pct": sue.get("eps_revision_pct"),
                 }
             except Exception as e:
                 logger.warning("Fundamental data fetch failed", ticker=ticker, error=str(e))
@@ -110,13 +130,13 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
                     rev = f"{d['rev_growth']:.1%}" if d['rev_growth'] else 'N/A'
                     margin = f"{d['margin']:.1%}" if d['margin'] else 'N/A'
                     fcfy = f"{d['fcf_yield']:.1%}" if d['fcf_yield'] else 'N/A'
-                    eps_rev_str = (f"{d['eps_revision']:+.1%}" if d.get('eps_revision') is not None
-                                   else "N/A")
+                    sue_str = f"{d['sue']:+.1f}" if d.get("sue") is not None else "N/A"
+                    rev_pct = f"{d['eps_revision_pct']:+.0f}%" if d.get("eps_revision_pct") is not None else "N/A"
                     lines.append(
                         f"{ticker}: PE={d['pe']}, FwdPE={d['fpe']}, "
                         f"RevGrowth={rev}, Margin={margin}, "
                         f"D/E={d['de']}, CR={d['cr']}, FCF_Yield={fcfy}, "
-                        f"EPS_Revision={eps_rev_str}"
+                        f"SUE={sue_str}, EPS_Revision={rev_pct}"
                     )
 
                 from app.agents.llm_utils import call_llm_batched
@@ -155,9 +175,11 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
                 score += 0.1
             if d["margin"] and d["margin"] > 0.1:
                 score += 0.1
+            if d.get("sue") is not None and d["sue"] > 2.0:
+                score += 0.1
             entry = {
                 "score": round(max(0.0, min(1.0, score)), 4),
-                "reasoning": f"Rule-based: PE={d['pe']}, RevGrowth={d['rev_growth']}",
+                "reasoning": f"Rule-based: PE={d['pe']}, RevGrowth={d['rev_growth']}, SUE={d.get('sue')}",
             }
             scores[ticker] = entry
             score_set("fundamental", ticker, entry)
@@ -171,6 +193,8 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
                 "revenue_growth": d["rev_growth"],
                 "profit_margin": d["margin"],
                 "fcf_yield": d["fcf_yield"],
+                "sue": d.get("sue"),
+                "eps_revision_pct": d.get("eps_revision_pct"),
             })
 
         logger.info("Fundamental node complete", tickers_analyzed=len(scores))

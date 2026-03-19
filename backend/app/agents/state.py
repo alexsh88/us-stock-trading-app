@@ -91,5 +91,9 @@ class AgentState(TypedDict):
     # Final output
     trade_signals: list[TradeSignalData]
 
+    # News headlines per ticker — populated by sentiment node, stored in news_embeddings
+    # Format: {ticker: ["headline 1", "headline 2", ...]}
+    news_headlines: dict[str, list[str]]
+
     # Parallel-safe error accumulator (operator.add reducer appends from all parallel nodes)
     errors: Annotated[list[str], operator.add]
