@@ -29,7 +29,7 @@ export default function DashboardPage() {
     fetch(`${API_URL}/api/v1/analysis/latest`)
       .then((r) => r.ok ? r.json() : null)
       .then(async (run) => {
-        if (!run || run.status !== "completed") return;
+        if (!run || run.status.toLowerCase() !== "completed") return;
         setCurrentRun(run);
         setSelectedRunId(run.id);
         const sigRes = await fetch(`${API_URL}/api/v1/analysis/${run.id}/signals`);
@@ -61,7 +61,7 @@ export default function DashboardPage() {
     return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
-  const completedHistory = history.filter((r) => r.status === "completed");
+  const completedHistory = history.filter((r) => r.status.toLowerCase() === "completed");
 
   return (
     <div className="space-y-6">
@@ -120,13 +120,13 @@ export default function DashboardPage() {
       {/* Status banner */}
       {currentRun && (
         <div className="bg-secondary rounded-lg p-3 flex items-center gap-3 text-sm">
-          {currentRun.status === "running" && (
+          {currentRun.status.toLowerCase() === "running" && (
             <>
               <RefreshCw className="h-4 w-4 animate-spin text-primary" />
               <span>Analysis running — screened {currentRun.tickers_screened ?? 0} tickers...</span>
             </>
           )}
-          {currentRun.status === "completed" && (
+          {currentRun.status.toLowerCase() === "completed" && (
             <>
               <TrendingUp className="h-4 w-4 text-green-500" />
               <span>
@@ -134,7 +134,7 @@ export default function DashboardPage() {
               </span>
             </>
           )}
-          {currentRun.status === "failed" && (
+          {currentRun.status.toLowerCase() === "failed" && (
             <>
               <AlertCircle className="h-4 w-4 text-destructive" />
               <span className="text-destructive">{currentRun.error_message ?? "Analysis failed"}</span>

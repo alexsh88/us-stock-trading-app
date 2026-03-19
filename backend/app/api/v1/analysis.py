@@ -57,10 +57,19 @@ async def get_run_history(limit: int = 20, db: AsyncSession = Depends(get_db_ses
 
 @router.get("/latest", response_model=AnalysisRunResponse)
 async def get_latest_run(db: AsyncSession = Depends(get_db_session)):
+    # Prefer the most recent completed run; fall back to any run if none completed
     result = await db.execute(
-        select(AnalysisRun).order_by(AnalysisRun.created_at.desc()).limit(1)
+        select(AnalysisRun)
+        .where(AnalysisRun.status == "COMPLETED")
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(1)
     )
     run = result.scalar_one_or_none()
+    if not run:
+        result = await db.execute(
+            select(AnalysisRun).order_by(AnalysisRun.created_at.desc()).limit(1)
+        )
+        run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(status_code=404, detail="No analysis runs found")
     return run

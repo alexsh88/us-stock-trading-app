@@ -27,7 +27,7 @@ export function useAnalysisRun() {
         const run = await res.json();
         setCurrentRun(run);
 
-        if (run.status === "completed") {
+        if (run.status.toLowerCase() === "completed") {
           stopPolling();
           setIsLoading(false);
           // Fetch signals
@@ -35,7 +35,7 @@ export function useAnalysisRun() {
           if (sigRes.ok) {
             setSignals(await sigRes.json());
           }
-        } else if (run.status === "failed") {
+        } else if (run.status.toLowerCase() === "failed") {
           stopPolling();
           setIsLoading(false);
           setError(run.error_message ?? "Analysis failed");
