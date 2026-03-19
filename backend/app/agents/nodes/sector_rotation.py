@@ -146,7 +146,7 @@ SECTOR_SYSTEM = (
     "NEWS_SIGNAL: positive, neutral, or negative. REASONING: max 80 chars."
 )
 
-TOP_N_SECTORS = 5  # Keep tickers from this many sectors
+TOP_N_SECTORS = 5  # Default; overridden at runtime by state["sector_top_n"]
 
 
 def _compute_sector_rs() -> dict[str, float]:
@@ -200,7 +200,7 @@ def _fetch_sector_news(finnhub_key: str, etfs: list[str]) -> dict[str, list[str]
     return news
 
 
-def _rank_sectors_llm(client: Any, rs_map: dict[str, float], news_map: dict[str, list[str]]) -> list[str]:
+def _rank_sectors_llm(client: Any, rs_map: dict[str, float], news_map: dict[str, list[str]], top_n: int = TOP_N_SECTORS) -> list[str]:
     """Use Claude Haiku to rank sectors by momentum + news. Returns ranked sector name list."""
     import re
     lines = []
@@ -252,13 +252,13 @@ def _rank_sectors_llm(client: Any, rs_map: dict[str, float], news_map: dict[str,
             seen.add(name)
             result.append(name)
 
-    return result[:TOP_N_SECTORS] if result else []
+    return result[:top_n] if result else []
 
 
-def _rank_sectors_rule_based(rs_map: dict[str, float]) -> list[str]:
+def _rank_sectors_rule_based(rs_map: dict[str, float], top_n: int = TOP_N_SECTORS) -> list[str]:
     """Fallback: return top N sectors by trailing RS vs SPY."""
     ranked = sorted(SECTOR_ETFS.items(), key=lambda kv: rs_map.get(kv[0], 0.0), reverse=True)
-    return [sector for _, sector in ranked[:TOP_N_SECTORS]]
+    return [sector for _, sector in ranked[:top_n]]
 
 
 def _filter_by_sectors(tickers: list[str], favored: list[str]) -> list[str]:
@@ -272,9 +272,21 @@ def _filter_by_sectors(tickers: list[str], favored: list[str]) -> list[str]:
 def sector_rotation_node(state: dict[str, Any]) -> dict[str, Any]:
     tickers = state.get("candidate_tickers", [])
     mode = state.get("mode", "swing")
+    top_n = state.get("sector_top_n", TOP_N_SECTORS)
 
     if not tickers:
         return {"candidate_tickers": [], "favored_sectors": [], "sector_scores": {}, "errors": []}
+
+    # When the user supplied a custom watchlist, they chose those tickers deliberately —
+    # sector rotation should NOT filter them out.
+    if state.get("watchlist_active"):
+        logger.info("Sector rotation bypassed — custom watchlist active", tickers=len(tickers))
+        return {
+            "candidate_tickers": tickers,
+            "favored_sectors": [],
+            "sector_scores": {},
+            "errors": [],
+        }
 
     try:
         from app.agents.cache_utils import sector_get, sector_set
@@ -283,7 +295,7 @@ def sector_rotation_node(state: dict[str, Any]) -> dict[str, Any]:
         # 1. Check cache
         cached = sector_get(mode)
         if cached:
-            favored = cached["favored_sectors"]
+            favored = cached["favored_sectors"][:top_n]  # respect current sector_top_n
             sector_scores = cached["sector_scores"]
             filtered = _filter_by_sectors(tickers, favored)
             result = filtered if filtered else tickers
@@ -323,12 +335,12 @@ def sector_rotation_node(state: dict[str, Any]) -> dict[str, Any]:
             try:
                 from anthropic import Anthropic
                 client = Anthropic(api_key=settings.anthropic_api_key)
-                favored = _rank_sectors_llm(client, rs_map, news_map)
+                favored = _rank_sectors_llm(client, rs_map, news_map, top_n=top_n)
             except Exception as e:
                 logger.warning("Sector LLM ranking failed, using RS fallback", error=str(e))
 
         if not favored:
-            favored = _rank_sectors_rule_based(rs_map)
+            favored = _rank_sectors_rule_based(rs_map, top_n=top_n)
 
         # Annotate sector_scores with rank
         for i, s in enumerate(favored):

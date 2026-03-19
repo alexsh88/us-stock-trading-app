@@ -48,13 +48,14 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_to
         session.commit()
 
         try:
-            # Parse custom watchlist — bypass screener if provided
+            # Parse custom watchlist — bypass screener + sector filter if provided
             custom_tickers = [t.strip().upper() for t in watchlist.split(",") if t.strip()] if watchlist else []
 
             initial_state = {
                 "mode": mode,
                 "top_n": top_n,
                 "sector_top_n": sector_top_n,
+                "watchlist_active": bool(custom_tickers),
                 "run_id": run_id,
                 "candidate_tickers": custom_tickers,  # pre-populated = screener skipped
                 "market_regime": {"sizing_multiplier": 1.0, "entry_allowed": True, "regime": "unknown"},
