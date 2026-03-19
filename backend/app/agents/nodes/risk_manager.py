@@ -21,6 +21,24 @@ def calculate_atr(hist: pd.DataFrame, period: int = 14) -> float:
         return 0.0
 
 
+def calculate_chandelier_stop(hist: pd.DataFrame, period: int = 10, multiplier: float = 2.5) -> float | None:
+    """Chandelier Exit: highest_close(period) - multiplier × ATR(period).
+    Ratchets up with price, never moves against the position.
+    Returns the current stop price or None if insufficient data.
+    """
+    try:
+        close = hist["Close"].squeeze()
+        if len(close) < period + 1:
+            return None
+        atr = calculate_atr(hist, period=period)
+        if atr == 0:
+            return None
+        highest_close = float(close.tail(period).max())
+        return round(highest_close - multiplier * atr, 2)
+    except Exception:
+        return None
+
+
 def kelly_position_size(win_rate: float, avg_win: float, avg_loss: float, max_pct: float = 5.0) -> float:
     if avg_loss == 0:
         return 0.0
@@ -73,9 +91,22 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                 if atr == 0 or current_price == 0:
                     continue
 
-                # ATR-based stop and minimum target
-                stop_distance = atr * atr_multiplier
-                stop_loss_price = round(current_price - stop_distance, 2)
+                # Stop loss: Chandelier Exit for swing (ratcheting), plain ATR for intraday
+                if mode == "swing":
+                    chandelier = calculate_chandelier_stop(hist, period=10, multiplier=2.5)
+                    atr_stop = round(current_price - atr * atr_multiplier, 2)
+                    if chandelier and chandelier > atr_stop:
+                        # Chandelier is tighter (less risk) — prefer it
+                        stop_loss_price = chandelier
+                        stop_method = f"Chandelier-2.5x (ATR={atr:.3f})"
+                    else:
+                        stop_loss_price = atr_stop
+                        stop_method = f"ATR-{atr_multiplier}x (ATR={atr:.3f})"
+                else:
+                    stop_loss_price = round(current_price - atr * atr_multiplier, 2)
+                    stop_method = f"ATR-{atr_multiplier}x (ATR={atr:.3f})"
+
+                stop_distance = current_price - stop_loss_price
                 # Minimum target = entry + (stop_distance × min_rr)
                 min_target_price = round(current_price + stop_distance * min_rr, 2)
 
@@ -111,7 +142,7 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                     "take_profit_price": target_price,
                     "risk_reward_ratio": target_rr,
                     "position_size_pct": regime_adjusted_pct,
-                    "stop_loss_method": f"ATR-{atr_multiplier}x (ATR={atr:.3f})",
+                    "stop_loss_method": stop_method,
                     "min_rr": min_rr,
                     "regime_sizing": regime_sizing,
                 }
