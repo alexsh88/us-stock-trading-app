@@ -5,10 +5,11 @@ import {
   TrendingUp, BarChart2, Activity, Layers, ShieldCheck,
   History, Settings, ChevronRight, Info, Zap, Target,
   AlertTriangle, CheckCircle2, Clock, Globe, Database,
+  type LucideIcon,
 } from "lucide-react";
 
 function Section({ id, icon: Icon, title, children }: {
-  id?: string; icon: any; title: string; children: React.ReactNode;
+  id?: string; icon: LucideIcon; title: string; children: React.ReactNode;
 }) {
   return (
     <section id={id} className="space-y-4">
@@ -32,7 +33,7 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 }
 
 function Callout({ icon: Icon, color, title, children }: {
-  icon: any; color: string; title: string; children: React.ReactNode;
+  icon: LucideIcon; color: string; title: string; children: React.ReactNode;
 }) {
   const colors: Record<string, string> = {
     blue:   "bg-blue-500/10 border-blue-500/30 text-blue-400",
@@ -107,6 +108,7 @@ export default function GuidePage() {
           ["MTF Alignment", "#mtf"],
           ["BB Squeeze", "#squeeze"],
           ["EMA 150 & Streak", "#ema150"],
+          ["Chart Patterns", "#patterns"],
           ["Breakout Score", "#breakout"],
           ["RS Rank", "#rs"],
           ["Sector Rotation", "#sector"],
@@ -177,9 +179,11 @@ export default function GuidePage() {
               <div>
                 <p className="font-medium mb-1">Entry / Stop / Target</p>
                 <p className="text-muted-foreground">
-                  Entry = current price at analysis time. Stop = ATR-based stop loss.
-                  Target = calculated take-profit. The R:R ratio shows how many dollars
-                  you make for every dollar risked.
+                  Entry = current price at analysis time. Stop = pattern-specific stop
+                  when a chart pattern is detected with strength ≥ 0.65; otherwise
+                  Chandelier Exit or ATR-based. Target = pattern measured-move target
+                  (or swing resistance / minimum R:R). The R:R ratio shows how many
+                  dollars you make for every dollar risked.
                 </p>
               </div>
             </div>
@@ -311,7 +315,7 @@ export default function GuidePage() {
             ].map(({ badge, badgeColor, threshold, desc, tip }) => (
               <div key={badge} className="bg-secondary/50 rounded-lg p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <Badge label={badge} color={badgeColor as any} />
+                  <Badge label={badge} color={badgeColor} />
                   <span className="text-xs font-mono text-muted-foreground">{threshold}</span>
                 </div>
                 <p className="text-sm text-muted-foreground">{desc}</p>
@@ -427,6 +431,98 @@ export default function GuidePage() {
           A stock at EMA150 +30% with a 6-day streak in a choppy market is the classic &quot;late to the party&quot;
           setup — the pipeline will score it significantly lower than a stock at EMA150 +10% with a 3-day
           streak in a trending regime, even if their RSI and MACD look similar.
+        </Callout>
+      </Section>
+
+      {/* ── 5c. Chart Patterns ── */}
+      <Section id="patterns" icon={TrendingUp} title="Chart Pattern Detection">
+        <Card className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            After computing all technical indicators, the pipeline runs <strong>7 classical chart
+            pattern detectors</strong> against each stock&apos;s price history. A detected pattern
+            directly controls the stop loss and target price — providing more precise risk levels
+            than a generic ATR multiple.
+          </p>
+
+          <div className="space-y-3">
+            {[
+              {
+                name: "Bull Flag",
+                badge: "green",
+                when: "Strong pole (≥15% gain in 5–25 bars) + tight 3–10 bar consolidation with declining volume",
+                stop: "Below flag low",
+                target: "Pivot + pole height",
+              },
+              {
+                name: "Double Bottom",
+                badge: "green",
+                when: "Two lows within 3% of each other, separated by ≥10 bars — classic W reversal",
+                stop: "Below the lower of the two bottoms",
+                target: "Neckline + pattern height",
+              },
+              {
+                name: "Ascending Triangle",
+                badge: "green",
+                when: "Flat resistance ceiling (2+ touches) + rising support trendline converging toward resistance",
+                stop: "Below most recent swing low",
+                target: "Resistance + triangle height",
+              },
+              {
+                name: "VCP (Volatility Contraction)",
+                badge: "green",
+                when: "2–4 phases each with smaller % range AND lower volume than the prior phase. Final phase ≤10% range (Minervini)",
+                stop: "Below final contraction low",
+                target: "None fixed — use swing resistance",
+              },
+              {
+                name: "Cup & Handle",
+                badge: "green",
+                when: "U-shaped base 6–26 weeks, 12–35% cup depth, lips within 5%, handle pullback 3–15% (O'Neil)",
+                stop: "7.5% below handle high (pivot)",
+                target: "Pivot + cup depth",
+              },
+              {
+                name: "Inverse Head & Shoulders",
+                badge: "green",
+                when: "Three swing lows: head deepest (≥4% below shoulders), shoulders within 6% of each other",
+                stop: "Below right shoulder",
+                target: "Neckline + pattern height",
+              },
+              {
+                name: "Head & Shoulders",
+                badge: "red",
+                when: "Three swing highs: middle highest. Bearish topping pattern — used for short signals",
+                stop: "Above the head",
+                target: "Neckline − pattern height (short target)",
+              },
+            ].map(({ name, badge, when, stop, target }) => (
+              <div key={name} className="bg-secondary/50 rounded-lg p-4 space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Badge label={name} color={badge} />
+                </div>
+                <p className="text-muted-foreground"><span className="text-foreground font-medium">When: </span>{when}</p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div><span className="text-red-400 font-medium">Stop: </span><span className="text-muted-foreground">{stop}</span></div>
+                  <div><span className="text-green-400 font-medium">Target: </span><span className="text-muted-foreground">{target}</span></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Callout icon={Info} color="indigo" title="Stop loss priority">
+          When a pattern is detected with strength ≥ 0.65, its specific stop price takes
+          priority over the Chandelier Exit and ATR-based stop. This gives tighter, more
+          meaningful risk levels — e.g. the Bull Flag stop sits just below the flag
+          consolidation, not an arbitrary ATR multiple away. Below 0.65 strength, the
+          Chandelier Exit is used (swing mode) or ATR-1.5× (intraday).
+        </Callout>
+
+        <Callout icon={CheckCircle2} color="green" title="Pattern strength score (0–1)">
+          Each detector returns a strength score based on quality criteria: shoulder symmetry,
+          cup depth in the ideal range, handle volume contraction, proximity to pivot, recency.
+          Patterns below 0.42 are discarded as noise. Patterns above 0.65 influence stop/target.
+          Patterns above 0.70 receive a score bonus from the technical LLM agent.
         </Callout>
       </Section>
 
@@ -690,11 +786,11 @@ export default function GuidePage() {
             {[
               { icon: ShieldCheck, label: "Screener",            color: "text-blue-400",   desc: "Ranks 14 sector ETFs → builds dynamic stock pool from top N sectors (~40–65 tickers) → filters by price, volume, ATR, RS rank → ~10–20 final candidates. No LLM, pure math." },
               { icon: Globe,       label: "Sector Rotation",    color: "text-sky-400",    desc: "Re-ranks top sectors by RS + today's Finnhub news (Haiku). Removes candidates from lagging sectors. Result cached 4h." },
-              { icon: Activity,    label: "Technical Agent",    color: "text-indigo-400", desc: "RSI, MACD, ADX, EMA150 distance, day streak, BB Squeeze, Breakout Score, Swing Levels, MTF alignment → Haiku scores 0–1. Cached 2h." },
+              { icon: Activity,    label: "Technical Agent",    color: "text-indigo-400", desc: "RSI, MACD, ADX, EMA150 distance, day streak, BB Squeeze, Breakout Score, Swing Levels, MTF alignment + 7 chart patterns (BullFlag, DblBottom, AscTriangle, VCP, Cup&Handle, InvH&S, H&S) → Haiku scores 0–1. Cached 2h." },
               { icon: BarChart2,   label: "Fundamental Agent",  color: "text-violet-400", desc: "P/E, revenue growth, FCF yield, margins via yfinance → Haiku scores 0–1. Cached 24h." },
               { icon: TrendingUp,  label: "Sentiment Agent",    color: "text-pink-400",   desc: "Finnhub news + ApeWisdom Reddit mentions → Haiku scores 0–1. Cached 30min." },
               { icon: Zap,         label: "Catalyst Agent",     color: "text-orange-400", desc: "Earnings dates, recent news events → Haiku scores 0–1. Cached 4h." },
-              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "ATR-based stops (2× swing, 1.5× intraday), Kelly position sizing capped at 5%. Pure math." },
+              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop priority: pattern-specific stop (if strength ≥ 0.65) → Chandelier Exit → ATR-based. Kelly position sizing capped at 5%. Pure math." },
               { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF data → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
             ].map(({ icon: Icon, label, color, desc }, i, arr) => (
               <div key={label} className="flex gap-3">
