@@ -14,6 +14,7 @@ celery_app = Celery(
         "app.tasks.paper_trade_tasks",
         "app.tasks.backtest_tasks",
         "app.tasks.embedding_tasks",
+        "app.tasks.market_data_ingest_tasks",
     ],
 )
 
@@ -46,5 +47,9 @@ celery_app.conf.beat_schedule = {
     "nightly-embedding-backfill": {
         "task": "app.tasks.embedding_tasks.run_embedding_backfill",
         "schedule": crontab(hour=6, minute=0),  # 6:00 AM ET daily, before morning analysis
+    },
+    "nightly-ohlcv-ingest": {
+        "task": "app.tasks.market_data_ingest_tasks.run_daily_ingest",
+        "schedule": crontab(hour=16, minute=35, day_of_week="1-5"),  # 4:35 PM ET after market close
     },
 }

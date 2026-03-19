@@ -288,6 +288,46 @@ def _get_weekly_mtf(tickers: list[str], all_weekly: Any) -> dict[str, bool]:
     return result
 
 
+def _load_precomputed_technicals(tickers: list[str]) -> dict[str, dict]:
+    """
+    Query precomputed_technicals for rows updated today.
+    Returns {ticker: {sma20, sma50, vwap20, ema150}} for warm tickers only.
+    Tickers absent from the result need a full 1y yfinance download.
+    """
+    result: dict[str, dict] = {}
+    try:
+        import psycopg2
+        from datetime import date
+        from app.config import get_settings
+        db_url = get_settings().database_url.replace("postgresql+asyncpg://", "postgresql://")
+        conn = psycopg2.connect(db_url)
+        try:
+            with conn.cursor() as cur:
+                placeholders = ",".join(["%s"] * len(tickers))
+                cur.execute(
+                    f"""
+                    SELECT ticker, sma20, sma50, vwap20, ema150, last_close, last_volume
+                    FROM precomputed_technicals
+                    WHERE ticker IN ({placeholders})
+                      AND last_date >= %s
+                    """,
+                    tickers + [date.today()],
+                )
+                for row in cur.fetchall():
+                    ticker, sma20, sma50, vwap20, ema150, last_close, last_volume = row
+                    if sma20 is not None and ema150 is not None:
+                        result[ticker] = {
+                            "sma20": sma20, "sma50": sma50,
+                            "vwap20": vwap20, "ema150": ema150,
+                            "last_close": last_close, "last_volume": last_volume,
+                        }
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("precomputed_technicals query failed (non-fatal)", error=str(e))
+    return result
+
+
 def technical_node(state: dict[str, Any]) -> dict[str, Any]:
     tickers = state.get("candidate_tickers", [])
     if not tickers:
@@ -295,18 +335,49 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         from app.config import has_anthropic_key
-
-        # Batch download daily (1y) for all indicators — 1y needed for 150 EMA warmup
         from app.services.data_resilience import fetch_ohlcv_with_fallback
-        all_data, data_source = fetch_ohlcv_with_fallback(tickers, period="1y")
-        if all_data is None:
+
+        # Check which tickers have fresh pre-computed values in the DB.
+        # For those we can download only 3 months of daily data (enough for ADX,
+        # BB Squeeze, NR7, streak, swing levels) and use the DB-stored EMA150/SMA20.
+        # For cold tickers (no DB row yet) we still download 1y to warm the EMA.
+        precomputed = _load_precomputed_technicals(tickers)
+        warm_tickers = [t for t in tickers if t in precomputed]
+        cold_tickers = [t for t in tickers if t not in precomputed]
+
+        if warm_tickers:
+            logger.info("Technical node using DB pre-computed values",
+                        warm=len(warm_tickers), cold=len(cold_tickers))
+
+        # Download 3mo for warm tickers; 1y for cold tickers (EMA150 warmup needed)
+        all_data_warm = None
+        all_data_cold = None
+        data_source = "yfinance"
+
+        if warm_tickers:
+            all_data_warm, data_source = fetch_ohlcv_with_fallback(warm_tickers, period="3mo")
+        if cold_tickers:
+            all_data_cold, src = fetch_ohlcv_with_fallback(cold_tickers, period="1y")
+            if data_source == "yfinance":
+                data_source = src
+
+        if all_data_warm is None and all_data_cold is None:
             return {"technical_scores": {}, "errors": ["technical: all data sources failed"]}
         if data_source != "yfinance":
             logger.info("Technical node using fallback data source", source=data_source)
 
-        # Batch download weekly (1y) for MTF 20-week SMA
+        # Merge: prefer warm data for warm tickers; cold data for cold tickers
+        if all_data_warm is not None and all_data_cold is not None:
+            all_data = pd.concat([all_data_warm, all_data_cold], axis=1)
+        elif all_data_warm is not None:
+            all_data = all_data_warm
+        else:
+            all_data = all_data_cold
+
+        # Weekly download: 1y for cold tickers only (MTF SMA20-week)
+        weekly_period = "1y" if cold_tickers else "3mo"
         all_weekly = yf.download(
-            tickers, period="1y", interval="1wk",
+            tickers, period=weekly_period, interval="1wk",
             progress=False, auto_adjust=True, group_by="ticker"
         )
 
@@ -316,7 +387,25 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                 hist = all_data[ticker] if ticker in all_data.columns.get_level_values(0) else pd.DataFrame()
                 if hist.empty or len(hist) < 20:
                     continue
-                indicators[ticker] = _calc_indicators(hist)
+                ind = _calc_indicators(hist)
+
+                # Overlay DB pre-computed values for warm tickers — overrides the
+                # pandas-computed sma20/vwap/ema150 with the authoritative DB values.
+                if ticker in precomputed:
+                    pre = precomputed[ticker]
+                    if pre.get("sma20") is not None:
+                        ind["bb_mid"] = pre["sma20"]          # SMA20 = BB midline
+                        ind["price_vs_sma"] = (ind["price"] - pre["sma20"]) / pre["sma20"] * 100
+                    if pre.get("vwap20") is not None:
+                        ind["vwap"] = pre["vwap20"]
+                    if pre.get("ema150") is not None:
+                        ema150_val = pre["ema150"]
+                        if ema150_val > 0:
+                            ind["ema150_pct"] = round(
+                                (ind["price"] - ema150_val) / ema150_val * 100, 1
+                            )
+
+                indicators[ticker] = ind
             except Exception as e:
                 logger.warning("Technical indicator calc failed", ticker=ticker, error=str(e))
 
