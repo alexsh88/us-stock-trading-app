@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     langchain_project: str = "us-stock-trading-app"
     langchain_tracing: bool = False
 
+    # OpenAI (news embeddings — text-embedding-3-small, ~$0.000005/day)
+    openai_api_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

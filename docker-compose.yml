@@ -44,6 +44,7 @@ services:
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING:-false}
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-us-stock-trading-app}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -69,6 +70,7 @@ services:
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING:-false}
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-us-stock-trading-app}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

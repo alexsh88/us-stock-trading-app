@@ -13,6 +13,7 @@ celery_app = Celery(
         "app.tasks.market_data_tasks",
         "app.tasks.paper_trade_tasks",
         "app.tasks.backtest_tasks",
+        "app.tasks.embedding_tasks",
     ],
 )
 
@@ -41,5 +42,9 @@ celery_app.conf.beat_schedule = {
     "nightly-backtest": {
         "task": "app.tasks.backtest_tasks.run_nightly_backtest",
         "schedule": crontab(hour=17, minute=30, day_of_week="1-5"),
+    },
+    "nightly-embedding-backfill": {
+        "task": "app.tasks.embedding_tasks.run_embedding_backfill",
+        "schedule": crontab(hour=6, minute=0),  # 6:00 AM ET daily, before morning analysis
     },
 }

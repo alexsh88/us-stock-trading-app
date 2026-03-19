@@ -5,6 +5,30 @@ from app.agents.cache_utils import get_factor_weights
 
 logger = structlog.get_logger()
 
+
+def _fetch_historical_context(ticker: str, state: dict[str, Any]) -> str:
+    """
+    Retrieve top-5 semantically similar past headlines with their T+5 outcomes.
+    Returns a formatted string to append to the ticker block, or "" if unavailable.
+    """
+    try:
+        headlines = state.get("news_headlines", {}).get(ticker, [])
+        if not headlines:
+            return ""
+        from app.tasks.embedding_tasks import fetch_similar_headlines
+        past = fetch_similar_headlines(ticker, headlines, limit=5)
+        if not past:
+            return ""
+        lines = ["Past similar headlines (T+5 outcomes):"]
+        for p in past:
+            ret = f"{p['return_5d']:+.1f}%" if p["return_5d"] is not None else "N/A"
+            hit = "TP✓" if p.get("tp_hit") else ("SL✗" if p.get("sl_hit") else "—")
+            lines.append(f"  [{p['date']} {p['ticker']}] {p['headline'][:80]} → {ret} {hit}")
+        return "\n" + "\n".join(lines)
+    except Exception as e:
+        logger.debug("Historical context fetch failed", ticker=ticker, error=str(e))
+        return ""
+
 SYNTHESIZER_SYSTEM = """You are an expert stock trading analyst. Analyze multiple stocks and return concise trading decisions.
 Be rigorous, risk-aware, and focus on high-probability setups only.
 ADX regime context: TRENDING(>25) = favour momentum/breakout setups; CHOPPY(<20) = favour mean-reversion, be more selective.
@@ -67,6 +91,8 @@ def _build_ticker_block(ticker: str, state: dict[str, Any], current_price: float
     resist_str = f"${resist:.2f}" if resist else "none"
     support_str = f"${support:.2f}" if support else "none"
 
+    hist_context = _fetch_historical_context(ticker, state)
+
     return (
         f"=== {ticker} @ ${current_price:.2f} ===\n"
         f"Technical: {tech.get('score', 0.5):.2f} | ADX={adx:.1f}({regime}) MTF={mtf} | {tech.get('reasoning', 'N/A')[:120]}\n"
@@ -75,6 +101,7 @@ def _build_ticker_block(ticker: str, state: dict[str, Any], current_price: float
         f"Catalyst: {cat.get('score', 0.5):.2f} | {cat.get('reasoning', 'N/A')[:80]}\n"
         f"Risk: Stop={stop_str} | MinTarget={target_str} (R:R={rr_str}) | Size={risk.get('position_size_pct', 2.0):.1f}% | {risk.get('stop_loss_method', 'ATR-2x')}\n"
         f"Levels: Resistance={resist_str} | Support={support_str} | Min R:R required={min_rr:.1f}x"
+        f"{hist_context}"
     )
 
 
