@@ -110,7 +110,8 @@ export default function PerformancePage() {
     fetchData();
   }, [fetchData]);
 
-  const noData = summary?.total_signals === 0;
+  const noData = !summary || summary.total_signals === 0;
+  const pending = (summary?.total_signals ?? 0) > 0 && (summary?.complete_evaluations ?? 0) === 0;
 
   return (
     <div className="space-y-6">
@@ -132,20 +133,28 @@ export default function PerformancePage() {
       {noData ? (
         <div className="text-center py-20 text-muted-foreground">
           <Activity className="h-12 w-12 mx-auto mb-3 opacity-20" />
-          <p className="font-medium">No evaluated signals yet</p>
-          <p className="text-sm mt-1">
-            The nightly backtest runs at 5:30 PM ET and evaluates BUY signals that are at least 1 day old.
-            Come back tomorrow after the first run.
-          </p>
+          <p className="font-medium">No signals tracked yet</p>
+          <p className="text-sm mt-1">Run an analysis to start tracking signal outcomes.</p>
         </div>
       ) : (
         <>
+          {/* Pending banner */}
+          {pending && (
+            <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-4 py-3 text-sm text-yellow-400">
+              <RefreshCw className="h-4 w-4 flex-shrink-0" />
+              <span>
+                <strong>{summary?.total_signals}</strong> signal{(summary?.total_signals ?? 0) !== 1 ? "s" : ""} tracked —
+                waiting for 5 trading days of data. The nightly backtest runs at 5:30 PM ET.
+              </span>
+            </div>
+          )}
+
           {/* Summary stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <StatCard
-              label="Signals Evaluated"
-              value={summary?.complete_evaluations ?? "—"}
-              sub={`${summary?.total_signals ?? 0} total tracked`}
+              label="Signals Tracked"
+              value={summary?.total_signals ?? "—"}
+              sub={`${summary?.complete_evaluations ?? 0} fully evaluated`}
             />
             <StatCard
               label="TP Hit Rate"

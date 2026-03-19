@@ -13,33 +13,33 @@ router = APIRouter()
 
 @router.get("/summary")
 async def get_backtest_summary(db: AsyncSession = Depends(get_db_session)):
-    """Overall signal performance summary across all evaluated signals."""
-    result = await db.execute(
-        select(SignalOutcome).where(SignalOutcome.is_complete == True)  # noqa: E712
-    )
-    outcomes = result.scalars().all()
+    """Overall signal performance summary across all tracked signals."""
+    # All tracked signals (including pending ones not yet evaluated)
+    all_result = await db.execute(select(SignalOutcome))
+    all_outcomes = all_result.scalars().all()
 
-    if not outcomes:
-        return {"total_signals": 0, "message": "No completed signal evaluations yet"}
+    if not all_outcomes:
+        return {"total_signals": 0, "complete_evaluations": 0, "message": "No signals tracked yet"}
 
-    total = len(outcomes)
-    with_returns = [o for o in outcomes if o.return_5d is not None]
-    tp_hits = sum(1 for o in outcomes if o.tp_hit)
-    sl_hits = sum(1 for o in outcomes if o.sl_hit)
+    total_tracked = len(all_outcomes)
+    complete = [o for o in all_outcomes if o.is_complete]
+    with_returns = [o for o in all_outcomes if o.return_5d is not None]
+    tp_hits = sum(1 for o in complete if o.tp_hit)
+    sl_hits = sum(1 for o in complete if o.sl_hit)
 
     avg_r = None
-    r_vals = [o.r_multiple for o in outcomes if o.r_multiple is not None]
+    r_vals = [o.r_multiple for o in complete if o.r_multiple is not None]
     if r_vals:
         avg_r = round(sum(r_vals) / len(r_vals), 3)
 
-    dir_1d = [o for o in outcomes if o.correct_direction_1d is not None]
-    dir_5d = [o for o in outcomes if o.correct_direction_5d is not None]
+    dir_1d = [o for o in all_outcomes if o.correct_direction_1d is not None]
+    dir_5d = [o for o in all_outcomes if o.correct_direction_5d is not None]
 
     return {
-        "total_signals": total,
-        "complete_evaluations": len(with_returns),
-        "tp_hit_rate": round(tp_hits / total, 4) if total else 0,
-        "sl_hit_rate": round(sl_hits / total, 4) if total else 0,
+        "total_signals": total_tracked,
+        "complete_evaluations": len(complete),
+        "tp_hit_rate": round(tp_hits / len(complete), 4) if complete else None,
+        "sl_hit_rate": round(sl_hits / len(complete), 4) if complete else None,
         "avg_r_multiple": avg_r,
         "direction_accuracy_1d": round(sum(1 for o in dir_1d if o.correct_direction_1d) / len(dir_1d), 4) if dir_1d else None,
         "direction_accuracy_5d": round(sum(1 for o in dir_5d if o.correct_direction_5d) / len(dir_5d), 4) if dir_5d else None,
