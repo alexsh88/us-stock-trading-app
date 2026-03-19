@@ -85,16 +85,55 @@ TICKER_SECTOR: dict[str, str] = {
     # Energy
     "XOM": "Energy", "CVX": "Energy", "COP": "Energy", "EOG": "Energy",
     "SLB": "Energy", "MPC": "Energy", "VLO": "Energy", "PSX": "Energy",
+    "OXY": "Energy", "HAL": "Energy", "DVN": "Energy", "FANG": "Energy",
+    "BKR": "Energy", "MRO": "Energy", "HES": "Energy", "APA": "Energy",
+    "AR":  "Energy", "RRC": "Energy",
     # Industrials
     "CAT": "Industrials", "DE":  "Industrials", "BA":  "Industrials",
     "GE":  "Industrials", "HON": "Industrials", "RTX": "Industrials",
     "LMT": "Industrials", "NOC": "Industrials", "GD":  "Industrials",
     "UPS": "Industrials", "FDX": "Industrials", "CSX": "Industrials",
-    "NSC": "Industrials",
-    # Materials
+    "NSC": "Industrials", "EMR": "Industrials", "ETN": "Industrials",
+    "PH":  "Industrials", "ROK": "Industrials", "CMI": "Industrials",
+    "CARR": "Industrials", "OTIS": "Industrials",
+    # Materials / Process Industries
     "FCX": "Materials", "NEM": "Materials", "ALB": "Materials", "MP": "Materials",
+    "LIN": "Materials", "APD": "Materials", "DOW": "Materials", "DD":  "Materials",
+    "CF":  "Materials", "MOS": "Materials",
+    "SHW": "Materials", "PPG": "Materials", "ECL": "Materials", "IFF": "Materials",
+    "CE":  "Materials", "NUE": "Materials", "STLD": "Materials", "RS": "Materials",
+    # Precious metals / gold miners (map to Materials as closest GICS)
+    "AEM": "Materials", "GOLD": "Materials", "KGC": "Materials",
+    "WPM": "Materials", "FNV": "Materials", "RGLD": "Materials",
     # Real Estate
-    "AMT": "Real Estate", "PLD": "Real Estate", "EQIX": "Real Estate",
+    "AMT":  "Real Estate", "PLD":  "Real Estate", "EQIX": "Real Estate",
+    "CCI":  "Real Estate", "PSA":  "Real Estate", "EQR":  "Real Estate",
+    "AVB":  "Real Estate", "O":    "Real Estate", "WELL": "Real Estate",
+    "SPG":  "Real Estate", "VICI": "Real Estate", "DLR":  "Real Estate",
+    "IRM":  "Real Estate", "SBAC": "Real Estate", "EXR":  "Real Estate",
+    # Utilities
+    "NEE": "Utilities", "DUK": "Utilities", "SO":  "Utilities", "D":   "Utilities",
+    "AEP": "Utilities", "EXC": "Utilities", "XEL": "Utilities", "ED":  "Utilities",
+    "WEC": "Utilities", "ES":  "Utilities", "AWK": "Utilities", "PPL": "Utilities",
+    "ETR": "Utilities", "AES": "Utilities", "CNP": "Utilities",
+    # Consumer Staples
+    "PG":   "Consumer Staples", "KO":  "Consumer Staples", "PEP":  "Consumer Staples",
+    "PM":   "Consumer Staples", "MO":  "Consumer Staples", "MDLZ": "Consumer Staples",
+    "CL":   "Consumer Staples", "KHC": "Consumer Staples", "GIS":  "Consumer Staples",
+    "K":    "Consumer Staples", "HSY": "Consumer Staples", "EL":   "Consumer Staples",
+    "CHD":  "Consumer Staples",
+    # Financials additions
+    "COF": "Financials", "USB": "Financials", "PNC": "Financials",
+    "TFC": "Financials", "SCHW": "Financials", "ICE": "Financials", "CME": "Financials",
+    # Healthcare additions
+    "BSX": "Health Care", "MDT": "Health Care", "EW":   "Health Care",
+    "REGN": "Health Care", "VRTX": "Health Care",
+    # Communication Services additions
+    "T": "Communication Services", "VZ": "Communication Services",
+    "EA": "Communication Services", "WBD": "Communication Services",
+    # Consumer Discretionary additions
+    "ABNB": "Consumer Discretionary", "ETSY": "Consumer Discretionary",
+    "DPZ":  "Consumer Discretionary", "CMG":  "Consumer Discretionary",
 }
 
 SECTOR_SYSTEM = (

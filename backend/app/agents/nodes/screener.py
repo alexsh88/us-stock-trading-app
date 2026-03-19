@@ -7,34 +7,102 @@ from datetime import date, timedelta
 
 logger = structlog.get_logger()
 
-# ~100 liquid US stocks across all major sectors + SPY benchmark
-CANDIDATE_UNIVERSE = [
-    # Technology (mega-cap + mid-cap)
+# ── ETF-first sector rotation universe ──────────────────────────────────────
+# Stocks are grouped by their sector ETF. The screener ranks ETFs by 5d+1mo RS
+# vs SPY and dynamically builds the candidate universe from the top 2-3 sectors.
+# This ensures the pipeline always focuses on whatever sector is leading RIGHT NOW
+# instead of a static mega-cap bias.
+ETF_SECTOR_STOCKS: dict[str, list[str]] = {
+    # XLK — Technology
+    "XLK": [
+        "AAPL", "MSFT", "NVDA", "AMD", "AVGO", "ORCL", "CRM", "ADBE",
+        "QCOM", "TXN", "INTC", "MU", "AMAT", "LRCX", "KLAC", "MRVL",
+        "PANW", "SNPS", "CDNS", "NOW", "SNOW", "PLTR",
+    ],
+    # XLE — Energy
+    "XLE": [
+        "XOM", "CVX", "COP", "EOG", "SLB", "MPC", "VLO", "PSX",
+        "OXY", "HAL", "DVN", "FANG", "BKR", "MRO", "HES", "APA",
+        "AR", "RRC",
+    ],
+    # XLF — Financials
+    "XLF": [
+        "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "AXP",
+        "V", "MA", "PYPL", "SQ", "SPGI", "MCO", "COF", "USB",
+        "PNC", "TFC", "SCHW", "ICE", "CME",
+    ],
+    # XLV — Health Care
+    "XLV": [
+        "UNH", "LLY", "JNJ", "ABBV", "MRK", "PFE", "TMO", "ABT",
+        "AMGN", "GILD", "BIIB", "MRNA", "DXCM", "ISRG", "IDXX",
+        "BSX", "MDT", "EW", "REGN", "VRTX",
+    ],
+    # XLI — Industrials / Defense
+    "XLI": [
+        "CAT", "DE", "BA", "GE", "HON", "RTX", "LMT", "NOC", "GD",
+        "UPS", "FDX", "CSX", "NSC", "EMR", "ETN", "PH", "ROK",
+        "CMI", "CARR", "OTIS",
+    ],
+    # XLC — Communication Services
+    "XLC": [
+        "GOOGL", "META", "NFLX", "DIS", "CMCSA", "CHTR", "T", "VZ",
+        "SPOT", "TTD", "ROKU", "RBLX", "COIN", "EA", "WBD",
+    ],
+    # XLB — Materials / Process Industries  ← key gap in prior static universe
+    "XLB": [
+        # Industrial gases / process chemicals
+        "LIN", "APD", "DOW", "DD", "CF", "MOS",
+        # Specialty chemicals
+        "SHW", "PPG", "ECL", "IFF", "CE",
+        # Mining / metals
+        "FCX", "NEM", "ALB", "MP", "NUE", "STLD", "RS",
+    ],
+    # XLP — Consumer Staples
+    "XLP": [
+        "COST", "WMT", "PG", "KO", "PEP", "PM", "MO", "MDLZ",
+        "CL", "KHC", "GIS", "K", "HSY", "EL", "CHD",
+    ],
+    # XLU — Utilities (defensive rotation target)
+    "XLU": [
+        "NEE", "DUK", "SO", "D", "AEP", "EXC", "XEL", "ED",
+        "WEC", "ES", "AWK", "PPL", "ETR", "AES", "CNP",
+    ],
+    # XLRE — Real Estate
+    "XLRE": [
+        "AMT", "PLD", "EQIX", "CCI", "PSA", "EQR", "AVB",
+        "O", "WELL", "SPG", "VICI", "DLR", "IRM", "SBAC", "EXR",
+    ],
+    # XLY — Consumer Discretionary
+    "XLY": [
+        "AMZN", "TSLA", "HD", "LOW", "MCD", "SBUX", "NKE",
+        "LULU", "DECK", "BURL", "TJX", "ROST", "TGT",
+        "UBER", "LYFT", "ABNB", "ETSY", "DPZ", "CMG",
+    ],
+    # GLD — Gold / precious metals (commodity rotation)
+    "GLD": [
+        "NEM", "AEM", "GOLD", "KGC", "WPM", "FNV", "RGLD",
+    ],
+    # USO — Oil (commodity rotation; overlaps XLE intentionally)
+    "USO": [
+        "XOM", "CVX", "COP", "OXY", "MPC", "VLO", "SLB", "HAL", "BKR",
+    ],
+}
+
+# All ETFs used for sector ranking (keys of above + benchmark)
+_ALL_SECTOR_ETFS: list[str] = list(ETF_SECTOR_STOCKS.keys())
+
+# Static fallback — used only when ETF ranking fails entirely
+FALLBACK_UNIVERSE = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AMD",
-    "AVGO", "ORCL", "CRM", "ADBE", "QCOM", "TXN", "INTC", "MU",
-    "AMAT", "LRCX", "KLAC", "MRVL", "PANW", "SNPS", "CDNS", "NOW",
-    "SNOW", "PLTR", "COIN", "RBLX", "UBER", "LYFT",
-    # Financials
-    "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "AXP",
-    "V", "MA", "PYPL", "SQ", "SPGI", "MCO",
-    # Healthcare / Biotech
-    "UNH", "LLY", "JNJ", "ABBV", "MRK", "PFE", "TMO", "ABT",
-    "AMGN", "GILD", "BIIB", "MRNA", "DXCM", "ISRG", "IDXX",
-    # Consumer Discretionary
-    "HD", "LOW", "COST", "WMT", "TGT", "AMZN", "MCD", "SBUX",
-    "NKE", "LULU", "DECK", "BURL", "TJX", "ROST",
-    # Communication / Media
-    "NFLX", "DIS", "CMCSA", "CHTR", "SPOT", "TTD", "ROKU",
-    # Energy
-    "XOM", "CVX", "COP", "EOG", "SLB", "MPC", "VLO", "PSX",
-    # Industrials / Defense
-    "CAT", "DE", "BA", "GE", "HON", "RTX", "LMT", "NOC", "GD",
-    "UPS", "FDX", "CSX", "NSC",
-    # Materials / Commodities
-    "FCX", "NEM", "ALB", "MP",
-    # Real Estate / REITs
-    "AMT", "PLD", "EQIX",
-    # SPY benchmark (must stay last)
+    "AVGO", "ORCL", "CRM", "ADBE", "QCOM", "TXN", "MU", "AMAT",
+    "JPM", "BAC", "WFC", "GS", "V", "MA",
+    "UNH", "LLY", "JNJ", "ABBV", "TMO",
+    "HD", "MCD", "NKE", "COST", "WMT",
+    "XOM", "CVX", "COP", "SLB",
+    "CAT", "BA", "GE", "HON", "RTX", "LMT",
+    "FCX", "NEM", "ALB",
+    "AMT", "PLD",
+    "NFLX", "DIS",
     "SPY",
 ]
 
@@ -126,6 +194,59 @@ def _get_market_regime() -> dict:
         return {"regime": "unknown", "sizing_multiplier": 1.0, "entry_allowed": True, "vix": 20.0, "reason": "detection failed"}
 
 
+def _rank_sector_etfs(top_n: int = 3) -> list[str]:
+    """Rank sector ETFs by combined 5-day and 1-month RS vs SPY.
+    Returns top_n ETF tickers. Returns [] on any failure (caller falls back to static universe).
+
+    Score = 0.6 × rs_5d + 0.4 × rs_1mo
+    Short-term (5d) weighted higher to catch fresh sector rotations early.
+    """
+    try:
+        download_tickers = _ALL_SECTOR_ETFS + ["SPY"]
+        data = yf.download(
+            download_tickers, period="1mo", interval="1d",
+            progress=False, auto_adjust=True, group_by="ticker",
+        )
+        if data.empty:
+            return []
+
+        # SPY returns as benchmark
+        spy_close = data["SPY"]["Close"].dropna() if "SPY" in data.columns.get_level_values(0) else pd.Series()
+        if len(spy_close) < 6:
+            return []
+        spy_ret_1mo = float(spy_close.iloc[-1] / spy_close.iloc[0] - 1)
+        spy_ret_5d  = float(spy_close.iloc[-1] / spy_close.tail(5).iloc[0] - 1)
+
+        scores: dict[str, float] = {}
+        for etf in _ALL_SECTOR_ETFS:
+            try:
+                if etf not in data.columns.get_level_values(0):
+                    continue
+                close = data[etf]["Close"].dropna()
+                if len(close) < 6:
+                    continue
+                rs_1mo = float(close.iloc[-1] / close.iloc[0] - 1) - spy_ret_1mo
+                rs_5d  = float(close.iloc[-1] / close.tail(5).iloc[0] - 1) - spy_ret_5d
+                scores[etf] = round(0.6 * rs_5d + 0.4 * rs_1mo, 4)
+            except Exception:
+                continue
+
+        if not scores:
+            return []
+
+        ranked = sorted(scores, key=lambda e: scores[e], reverse=True)
+        logger.info(
+            "Sector ETF ranking",
+            top3=ranked[:3],
+            scores={e: scores[e] for e in ranked[:5]},
+        )
+        return ranked[:top_n]
+
+    except Exception as e:
+        logger.warning("Sector ETF ranking failed — will use fallback universe", error=str(e))
+        return []
+
+
 def _get_earnings_dates(tickers: list[str]) -> dict[str, date | None]:
     """Fetch next earnings date for each ticker. Returns {ticker: date or None}."""
     earnings_dates: dict[str, date | None] = {}
@@ -167,13 +288,28 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
     regime = _get_market_regime()
     if not regime["entry_allowed"]:
         logger.warning("Market regime blocks entries", reason=regime["reason"])
-        # Still return candidates but with regime info — synthesizer will use sizing_multiplier=0
-        fallback = [t for t in CANDIDATE_UNIVERSE if t != "SPY"]
+        fallback = [t for t in FALLBACK_UNIVERSE if t != "SPY"]
         return {"candidate_tickers": fallback[:20], "market_regime": regime,
                 "errors": [f"regime_blocked: {regime['reason']}"]}
 
     try:
-        all_tickers = CANDIDATE_UNIVERSE  # includes SPY
+        # ── ETF-first pass: rank sectors, build dynamic universe ─────────────────
+        leading_etfs = _rank_sector_etfs(top_n=3)
+        if leading_etfs:
+            seen: set[str] = set()
+            dynamic: list[str] = []
+            for etf in leading_etfs:
+                for t in ETF_SECTOR_STOCKS.get(etf, []):
+                    if t not in seen:
+                        seen.add(t)
+                        dynamic.append(t)
+            all_tickers = dynamic + ["SPY"]
+            logger.info("ETF-first universe built",
+                        leading_etfs=leading_etfs, universe_size=len(dynamic))
+        else:
+            all_tickers = FALLBACK_UNIVERSE  # includes SPY
+            logger.warning("ETF rank unavailable — using static fallback universe")
+
         # Batch download all tickers — with circuit breaker fallback chain
         from app.services.data_resilience import fetch_ohlcv_with_fallback
         all_data, data_source = fetch_ohlcv_with_fallback(all_tickers, period="1mo")
@@ -191,7 +327,7 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
 
         spy_return = float((spy_close.iloc[-1] / spy_close.iloc[0]) - 1) if not spy_close.empty and len(spy_close) > 1 else None
 
-        candidates = [t for t in CANDIDATE_UNIVERSE if t != "SPY"]
+        candidates = [t for t in all_tickers if t != "SPY"]
 
         # --- First pass: collect data for all tickers passing price/volume/ATR filters ---
         ticker_data: dict[str, dict] = {}
@@ -264,7 +400,7 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
 
         if not ticker_data:
             logger.warning("Screener got no data from yfinance (rate-limited?) — passing full universe as fallback")
-            fallback = [t for t in CANDIDATE_UNIVERSE if t != "SPY"]
+            fallback = [t for t in FALLBACK_UNIVERSE if t != "SPY"]
             return {"candidate_tickers": fallback, "market_regime": regime,
                     "errors": ["screener: yfinance rate-limited, using fallback universe"]}
 
@@ -322,6 +458,6 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
 
     except Exception as e:
         logger.error("Screener node failed", error=str(e))
-        fallback = [t for t in CANDIDATE_UNIVERSE if t != "SPY"]
+        fallback = [t for t in FALLBACK_UNIVERSE if t != "SPY"]
         return {"candidate_tickers": fallback, "market_regime": regime if "regime" in dir() else {"sizing_multiplier": 1.0},
                 "errors": [f"screener: {e} — using fallback universe"]}
