@@ -13,13 +13,44 @@ BB_Squeeze=yes means volatility is compressed and a breakout is imminent — bul
 NR7=yes means today's range is the smallest of the last 7 days (Crabel) — strongest when combined with BB_Squeeze (dual volatility compression). Enter on next-session breakout above NR7 high.
 Breakout score 3/3 = high-conviction breakout (level + volume + RSI all confirmed).
 Short%Float: >25% = crowded short (both squeeze risk AND strong bearish consensus — be cautious). DTC>10 = illiquid short squeeze scenario.
+EMA150_pct: distance above/below 150-day EMA (Weinstein Stage 2). +5 to +15% = healthy uptrend. Above +25% = overextended, higher pullback risk. Negative = Stage 3/4 downtrend, avoid longs.
+Streak: consecutive up(+) or down(-) days. In CHOPPY regime, Streak>=+5 combined with RSI>65 or price near resistance = high mean-reversion risk, penalise. In TRENDING regime (ADX>25), a long up streak is momentum confirmation, NOT a sell signal on its own.
 Respond with one line per stock: TICKER|SCORE|REASONING (max 100 chars reasoning).
 
 Examples (use the full 0.0-1.0 range):
-NVDA|0.88|Trending ADX=34, MTF aligned, BB squeeze released, breakout 3/3, RSI=66 healthy
+NVDA|0.88|Trending ADX=34, MTF aligned, BB squeeze released, breakout 3/3, RSI=66, EMA150=+11% healthy
 XOM|0.29|Choppy ADX=15, MTF misaligned (weekly downtrend), no squeeze, breakout 0/3
-MSFT|0.63|Neutral ADX=22, MTF aligned, squeeze building 4 bars, breakout 1/3 partial confirmation
+MSFT|0.63|Neutral ADX=22, MTF aligned, squeeze building 4 bars, breakout 1/3, EMA150=+8%
+APA|0.44|Trending but Streak=+7d, EMA150=+29% overextended, RSI=74 overbought — wait for pullback
 GME|0.19|Choppy ADX=12, MTF misaligned, vol declining, breakout 0/3, avoid"""
+
+
+def _calc_streak(close: pd.Series) -> int:
+    """Count consecutive up or down closes from the most recent bar.
+    Returns positive int for an up streak, negative for a down streak, 0 if flat.
+    Example: 5 consecutive higher closes → +5; 3 consecutive lower closes → -3.
+    """
+    changes = close.diff().dropna()
+    if changes.empty:
+        return 0
+    recent = list(reversed(changes.values[-15:]))  # most recent first
+    streak = 0
+    for i, chg in enumerate(recent):
+        if i == 0:
+            if chg > 0:
+                streak = 1
+            elif chg < 0:
+                streak = -1
+            else:
+                break
+        else:
+            if streak > 0 and chg > 0:
+                streak += 1
+            elif streak < 0 and chg < 0:
+                streak -= 1
+            else:
+                break
+    return streak
 
 
 def _calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> tuple[float, str]:
@@ -204,6 +235,17 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
     daily_ranges = (high - low).tail(7)
     nr7 = len(daily_ranges) == 7 and float(daily_ranges.iloc[-1]) == float(daily_ranges.min())
 
+    # EMA 150 — Weinstein Stage 2 filter + overextension signal
+    # Needs ~150 bars; gracefully degrades to None if insufficient history
+    ema150_pct: float | None = None
+    if len(close) >= 60:  # minimum bars for a useful EMA150 estimate
+        ema150_val = float(close.ewm(span=150, adjust=False).mean().iloc[-1])
+        if ema150_val > 0:
+            ema150_pct = round((current_price - ema150_val) / ema150_val * 100, 1)
+
+    # Consecutive up/down day streak (Connors RSI component)
+    streak = _calc_streak(close)
+
     return {
         "price": current_price,
         "rsi": rsi,
@@ -218,6 +260,8 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
         "adx": adx_val,
         "regime": regime,
         "nr7": nr7,
+        "ema150_pct": ema150_pct,
+        "streak": streak,
         **swing,
         **squeeze,
         **breakout,
@@ -252,9 +296,9 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         from app.config import has_anthropic_key
 
-        # Batch download daily (3mo) for all indicators — with fallback chain
+        # Batch download daily (1y) for all indicators — 1y needed for 150 EMA warmup
         from app.services.data_resilience import fetch_ohlcv_with_fallback
-        all_data, data_source = fetch_ohlcv_with_fallback(tickers, period="3mo")
+        all_data, data_source = fetch_ohlcv_with_fallback(tickers, period="1y")
         if all_data is None:
             return {"technical_scores": {}, "errors": ["technical: all data sources failed"]}
         if data_source != "yfinance":
@@ -355,6 +399,13 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                         f"{ind['short_pct']:.0f}%/{ind['short_dtc']:.1f}d"
                         if ind.get("short_pct") is not None else "n/a"
                     )
+                    ema150 = ind.get("ema150_pct")
+                    ema150_str = (
+                        f"{ema150:+.1f}%"
+                        if ema150 is not None else "n/a"
+                    )
+                    streak = ind.get("streak", 0)
+                    streak_str = f"{streak:+d}d" if streak != 0 else "0d"
                     lines.append(
                         f"{ticker}: RSI={ind['rsi']:.1f}, MACD={'bull' if ind['macd_hist'] > 0 else 'bear'}, "
                         f"ATR%={ind['atr_pct']:.1f}%, ADX={ind['adx']:.1f}({ind['regime']}), "
@@ -364,7 +415,8 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                         f"VWAP={'above' if ind['price'] > ind['vwap'] else 'below'}, "
                         f"MTF={'yes' if ind['mtf_aligned'] else 'no'}, "
                         f"NR7={'yes' if ind.get('nr7') else 'no'}, "
-                        f"Short%/DTC={short_str}"
+                        f"Short%/DTC={short_str}, "
+                        f"EMA150={ema150_str}, Streak={streak_str}"
                     )
 
                 if mode == "intraday":
@@ -466,6 +518,16 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                     score += 0.12
                 else:
                     score -= 0.08
+                # EMA150 overextension penalty (rule-based only)
+                ema150 = ind.get("ema150_pct")
+                if ema150 is not None and ema150 > 25:
+                    score -= 0.08  # stretched above 150 EMA
+                elif ema150 is not None and ema150 < 0:
+                    score -= 0.10  # below 150 EMA = Stage 3/4
+                # Streak exhaustion: penalise only in non-trending regime
+                streak = ind.get("streak", 0)
+                if streak >= 5 and regime != "trending" and ind["rsi"] > 65:
+                    score -= 0.08  # mean-reversion risk
 
             entry = {
                 "score": round(max(0.0, min(1.0, score)), 4),
@@ -506,6 +568,8 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                 "short_dtc": ind.get("short_dtc"),
                 "breakout_details": ind.get("breakout_details", ""),
                 "nr7": ind.get("nr7", False),
+                "ema150_pct": ind.get("ema150_pct"),
+                "streak": ind.get("streak", 0),
             })
 
         logger.info("Technical node complete", tickers_analyzed=len(scores))
