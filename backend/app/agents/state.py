@@ -69,6 +69,7 @@ class AgentState(TypedDict):
     # Inputs
     mode: str  # swing / intraday
     top_n: int
+    sector_top_n: int  # number of leading ETFs to build universe from (1-14, default 3)
     run_id: str
 
     # Screener output

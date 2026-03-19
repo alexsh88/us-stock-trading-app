@@ -5,11 +5,22 @@ import { Settings, Save } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+const SECTOR_LABELS: Record<number, string> = {
+  1: "1 — single best sector (most focused)",
+  2: "2 — top two sectors",
+  3: "3 — top three sectors (default)",
+  4: "4 — top four sectors",
+  5: "5 — broader scan",
+  7: "7 — half the ETF list",
+  14: "14 — all sectors (same as old static screener)",
+};
+
 interface AppSettings {
   top_n: number;
   trading_mode: string;
   paper_trading: boolean;
   watchlist: string;
+  sector_top_n: number;
 }
 
 export default function SettingsPage() {
@@ -18,13 +29,14 @@ export default function SettingsPage() {
     trading_mode: "swing",
     paper_trading: true,
     watchlist: "",
+    sector_top_n: 3,
   });
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/settings/`)
       .then((r) => r.json())
-      .then((data) => setSettings({ ...data, watchlist: data.watchlist ?? "" }))
+      .then((data) => setSettings({ ...data, watchlist: data.watchlist ?? "", sector_top_n: data.sector_top_n ?? 3 }))
       .catch(() => {});
   }, []);
 
@@ -72,6 +84,35 @@ export default function SettingsPage() {
           </select>
         </div>
 
+        {/* Sector breadth slider */}
+        <div>
+          <label className="block text-sm font-medium mb-2">Sector Breadth</label>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground w-8 text-center font-mono">
+              {settings.sector_top_n}
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={14}
+              step={1}
+              value={settings.sector_top_n}
+              onChange={(e) => setSettings({ ...settings, sector_top_n: Number(e.target.value) })}
+              className="flex-1 accent-primary"
+            />
+            <span className="text-xs text-muted-foreground w-8 text-center font-mono">14</span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            {settings.sector_top_n === 1 && "Most focused — only the single strongest sector ETF this week"}
+            {settings.sector_top_n === 2 && "Top 2 sectors — tight focus, ~25-40 candidate stocks"}
+            {settings.sector_top_n === 3 && "Top 3 sectors (default) — ~40-65 candidates, good balance"}
+            {settings.sector_top_n === 4 && "Top 4 sectors — ~55-80 candidates, more variety"}
+            {settings.sector_top_n >= 5 && settings.sector_top_n <= 6 && `Top ${settings.sector_top_n} sectors — broad scan, ~80-110 candidates`}
+            {settings.sector_top_n >= 7 && settings.sector_top_n <= 13 && `Top ${settings.sector_top_n} sectors — very broad, less sector-rotation signal`}
+            {settings.sector_top_n === 14 && "All 14 sectors — equivalent to old static universe, no rotation bias"}
+          </p>
+        </div>
+
         <div>
           <label className="block text-sm font-medium mb-2">Custom Watchlist</label>
           <textarea
@@ -84,7 +125,7 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground mt-1">
             {settings.watchlist.trim()
               ? `${settings.watchlist.split(",").filter(t => t.trim()).length} tickers — screener will be skipped, these stocks go straight to analysis`
-              : "Empty = run auto-screener on 100-stock universe"}
+              : "Empty = use ETF-first auto-screener"}
           </p>
         </div>
 

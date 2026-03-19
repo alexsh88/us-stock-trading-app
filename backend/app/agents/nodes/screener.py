@@ -294,7 +294,8 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         # ── ETF-first pass: rank sectors, build dynamic universe ─────────────────
-        leading_etfs = _rank_sector_etfs(top_n=3)
+        sector_top_n = state.get("sector_top_n", 3)
+        leading_etfs = _rank_sector_etfs(top_n=sector_top_n)
         if leading_etfs:
             seen: set[str] = set()
             dynamic: list[str] = []

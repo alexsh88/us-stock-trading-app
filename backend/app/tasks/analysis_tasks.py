@@ -19,22 +19,22 @@ def _get_sync_session():
     return Session(), engine
 
 
-def run_morning_analysis(mode: str = "swing", top_n: int = 5, watchlist: str = "") -> dict:
+def run_morning_analysis(mode: str = "swing", top_n: int = 5, watchlist: str = "", sector_top_n: int = 3) -> dict:
     """Celery task: triggered by Beat at 9:00 AM ET."""
-    return _run_sync(str(uuid.uuid4()), mode, top_n, watchlist)
+    return _run_sync(str(uuid.uuid4()), mode, top_n, watchlist, sector_top_n)
 
 
-def run_on_demand(run_id: str, mode: str = "swing", top_n: int = 5, watchlist: str = "") -> dict:
+def run_on_demand(run_id: str, mode: str = "swing", top_n: int = 5, watchlist: str = "", sector_top_n: int = 3) -> dict:
     """Celery task: triggered by API endpoint."""
-    return _run_sync(run_id, mode, top_n, watchlist)
+    return _run_sync(run_id, mode, top_n, watchlist, sector_top_n)
 
 
-def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "") -> dict:
+def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_top_n: int = 3) -> dict:
     from app.models.analysis import AnalysisRun, RunStatus
     from app.models.signals import TradeSignal, TradeDecision, TradingMode
     from app.agents.graph import trading_graph
 
-    logger.info("Starting analysis run", run_id=run_id, mode=mode, top_n=top_n)
+    logger.info("Starting analysis run", run_id=run_id, mode=mode, top_n=top_n, sector_top_n=sector_top_n)
 
     session, engine = _get_sync_session()
     try:
@@ -54,6 +54,7 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "") -> dict:
             initial_state = {
                 "mode": mode,
                 "top_n": top_n,
+                "sector_top_n": sector_top_n,
                 "run_id": run_id,
                 "candidate_tickers": custom_tickers,  # pre-populated = screener skipped
                 "market_regime": {"sizing_multiplier": 1.0, "entry_allowed": True, "regime": "unknown"},
