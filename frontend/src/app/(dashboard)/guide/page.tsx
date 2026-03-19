@@ -106,6 +106,7 @@ export default function GuidePage() {
           ["ADX Regime", "#adx"],
           ["MTF Alignment", "#mtf"],
           ["BB Squeeze", "#squeeze"],
+          ["EMA 150 & Streak", "#ema150"],
           ["Breakout Score", "#breakout"],
           ["RS Rank", "#rs"],
           ["Sector Rotation", "#sector"],
@@ -131,7 +132,7 @@ export default function GuidePage() {
             <Step n={1} title="(Optional) Configure your watchlist">
               Go to <strong>Settings</strong> and type comma-separated tickers like{" "}
               <code className="bg-secondary px-1 rounded text-xs">AAPL, NVDA, MSFT</code>.
-              Leave it empty to let the auto-screener pick from a ~100-stock universe.
+              Leave it empty to let the ETF-first auto-screener dynamically build the universe from today&apos;s strongest sectors.
             </Step>
             <Step n={2} title="Choose Top N and click Run Analysis">
               Top N controls how many final signals the synthesizer returns. The pipeline
@@ -149,10 +150,10 @@ export default function GuidePage() {
         </Card>
 
         <Callout icon={Info} color="blue" title="How the pipeline selects stocks">
-          The screener filters the universe by price ($5–$2000), average volume, ATR volatility,
-          and RS rank (top 20% vs SPY). A <strong>sector rotation filter</strong> then keeps only
-          stocks from the top 5 sectors by momentum + today&apos;s news. Four AI agents score
-          each surviving stock in parallel — technical, fundamental, sentiment, and catalyst —
+          The screener first ranks all 14 sector ETFs by weekly momentum vs SPY. It pulls stocks
+          only from the top N leading sectors (default: top 3, ~40–65 candidates). Those candidates
+          are then filtered by price ($5–$2000), volume, ATR volatility, and RS rank. Four AI agents
+          score each surviving stock in parallel — technical, fundamental, sentiment, and catalyst —
           before a synthesizer makes the final BUY/SELL/SKIP decision.
         </Callout>
       </Section>
@@ -358,6 +359,77 @@ export default function GuidePage() {
         </Card>
       </Section>
 
+      {/* ── 5b. EMA 150 & Streak ── */}
+      <Section id="ema150" icon={TrendingUp} title="EMA 150 Distance & Day Streak">
+        <Card className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Two indicators that measure <strong>how extended a stock is</strong> relative to its
+            trend and recent momentum — both help avoid buying at the top of an overextended move.
+          </p>
+
+          <div className="space-y-4">
+            <div>
+              <p className="font-medium text-sm mb-2">EMA 150 Distance (Weinstein Stage 2)</p>
+              <p className="text-sm text-muted-foreground mb-3">
+                Shows how far the current price is from the 150-day Exponential Moving Average,
+                expressed as a percentage. This is the key trend filter from Stan Weinstein&apos;s
+                Stage Analysis — stocks in <em>Stage 2 uptrends</em> trade clearly above their EMA 150.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {[
+                  { range: "−∞ to 0%",   label: "Below EMA 150",      color: "bg-red-500/10 text-red-400 border border-red-500/20",      tip: "Stage 3/4 downtrend — avoid longs, −0.10 score penalty" },
+                  { range: "0% to +5%",  label: "Just above",          color: "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20", tip: "Early Stage 2 or recovery — neutral" },
+                  { range: "+5% to +25%", label: "Healthy uptrend",    color: "bg-green-500/10 text-green-400 border border-green-500/20",  tip: "Ideal range — trend intact, not overextended" },
+                  { range: "> +25%",     label: "Overextended",         color: "bg-orange-500/10 text-orange-400 border border-orange-500/20", tip: "Pullback risk — −0.08 score penalty" },
+                ].map(({ range, label, color, tip }) => (
+                  <div key={range} className={`rounded-lg p-3 ${color}`}>
+                    <p className="font-mono font-bold text-xs">{range}</p>
+                    <p className="font-medium mt-1">{label}</p>
+                    <p className="opacity-80 mt-0.5">{tip}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="font-medium text-sm mb-2">Consecutive Day Streak</p>
+              <p className="text-sm text-muted-foreground mb-3">
+                Counts consecutive days the stock closed higher (positive) or lower (negative).
+                A long streak in the right regime is momentum confirmation; in choppy conditions
+                it signals mean-reversion risk.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 space-y-1">
+                  <div className="flex items-center gap-2 text-green-400 font-medium text-xs">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Trending (ADX &gt; 25) + Streak ≥ 5
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Momentum confirmation. A stock running 5+ days in a strong trend is showing
+                    institutional follow-through — not necessarily exhausted.
+                  </p>
+                </div>
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 space-y-1">
+                  <div className="flex items-center gap-2 text-red-400 font-medium text-xs">
+                    <AlertTriangle className="h-4 w-4" />
+                    Choppy (ADX &lt; 20) + Streak ≥ 5 + RSI &gt; 65
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Mean-reversion risk. Without a real trend engine, a 5-day run in a choppy
+                    market is often exhaustion. Pipeline scores −0.08 here.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+        <Callout icon={Brain} color="indigo" title="Why these matter together">
+          A stock at EMA150 +30% with a 6-day streak in a choppy market is the classic &quot;late to the party&quot;
+          setup — the pipeline will score it significantly lower than a stock at EMA150 +10% with a 3-day
+          streak in a trending regime, even if their RSI and MACD look similar.
+        </Callout>
+      </Section>
+
       {/* ── 6. BB Squeeze ── */}
       <Section id="squeeze" icon={Zap} title="Bollinger Band Squeeze">
         <Card className="space-y-4">
@@ -461,62 +533,65 @@ export default function GuidePage() {
             <p className="text-muted-foreground">
               Stocks with strong recent relative performance tend to continue outperforming over
               the next 1–3 months. The effect is strongest in the top quintile. Below the 60th
-              percentile, the predictive power drops significantly. Keeping only top-20% RS
-              reduces the analysis universe from ~100 to ~15–20 stocks — meaning the LLM agents
-              spend their budget on the highest-quality setups.
+              percentile, the predictive power drops significantly. Combined with the ETF-first
+              sector filter (40–65 sector-focused candidates), keeping only top-20% RS narrows
+              the final analysis pool to ~10–20 tickers — meaning LLM agents focus only on the
+              highest-quality setups.
             </p>
           </div>
         </Card>
       </Section>
 
       {/* ── 9. Sector Rotation ── */}
-      <Section id="sector" icon={Globe} title="Sector Rotation Filter">
+      <Section id="sector" icon={Globe} title="ETF-First Sector Rotation">
         <Card className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            After the screener produces candidates, a <strong>sector rotation</strong> step filters
-            them to stocks from the <strong>top 5 most favorable sectors</strong> that day. This
-            prevents you from trading in sectors that are lagging the market or facing headwinds.
+            Instead of scanning a static list of stocks, the screener starts by ranking
+            <strong> all 14 sector ETFs</strong> against SPY. Only stocks that belong to the
+            leading sectors are included in the universe — so if Energy is the strongest sector
+            this week, Energy stocks dominate the candidate pool.
           </p>
 
           <div className="space-y-3 text-sm">
-            <p className="font-medium">How it works — two signals combined:</p>
+            <p className="font-medium">Two-pass process:</p>
             <div className="space-y-2">
               <div className="flex gap-3 items-start">
                 <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-bold">1</span>
                 <div>
-                  <p className="font-medium">Momentum RS (trailing)</p>
+                  <p className="font-medium">ETF ranking (upstream universe selection)</p>
                   <p className="text-muted-foreground">
-                    The 1-month return of each sector ETF (XLK, XLF, XLE…) vs SPY is computed.
-                    Sectors outperforming SPY are leading the market — a structural tailwind.
+                    All 14 ETFs (XLK, XLE, XLF, XLV, XLI, XLC, XLB, XLP, XLU, XLRE, XLY, GLD, SLV, USO)
+                    are scored as <code className="bg-secondary px-1 rounded text-xs">0.6 × RS_5d + 0.4 × RS_1mo</code> vs SPY.
+                    Top N ETFs (configurable via <strong>Sector Breadth</strong> setting, default 3) are selected.
+                    Their mapped stock pools are merged into the dynamic candidate universe (~40–65 tickers).
                   </p>
                 </div>
               </div>
               <div className="flex gap-3 items-start">
                 <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs font-bold">2</span>
                 <div>
-                  <p className="font-medium">News sentiment (today&apos;s headlines)</p>
+                  <p className="font-medium">Post-screener sector filter (news-adjusted)</p>
                   <p className="text-muted-foreground">
-                    Recent Finnhub headlines for each sector ETF are sent to Claude Haiku.
-                    The LLM considers both momentum and news to rank sectors — so if Energy
-                    has strong RS <em>and</em> positive news (e.g. rising oil prices), it ranks
-                    higher. If Financials have good RS but negative news (rate concerns), it
-                    adjusts down.
+                    After RS filtering, Claude Haiku re-ranks top sectors factoring in today&apos;s
+                    Finnhub headlines. If Energy has strong RS <em>and</em> positive news (rising oil),
+                    it ranks higher. If Financials have good RS but negative headlines (rate shock),
+                    it adjusts down. Result cached 4h.
                   </p>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-xs text-center">
-            {["XLK Tech", "XLF Finance", "XLE Energy", "XLV Health", "XLI Industry", "XLC Comms"].map(s => (
+          <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 text-xs text-center">
+            {["XLK Tech", "XLE Energy", "XLF Finance", "XLV Health", "XLI Industry", "XLB Materials", "XLC Comms", "GLD Gold", "USO Oil", "XLY Disc", "XLP Staples", "XLU Util", "XLRE REIT", "SLV Silver"].map(s => (
               <div key={s} className="bg-secondary rounded-lg py-2 px-1 text-muted-foreground font-medium">{s}</div>
             ))}
           </div>
 
           <Callout icon={CheckCircle2} color="green" title="Safe fallback">
-            If the sector filter would reduce candidates to zero, it passes all screener candidates
-            through unchanged. If Claude Haiku is unavailable, the filter falls back to pure RS
-            ranking — always selecting the top 5 momentum sectors.
+            If ETF ranking fails (network error), the screener falls back to a broad static universe
+            covering all sectors. The sector breadth setting (1–14) lets you control focus vs variety
+            — set to 14 to replicate the old all-sectors behaviour.
           </Callout>
         </Card>
       </Section>
@@ -587,8 +662,12 @@ export default function GuidePage() {
                 desc: "Swing (2–5 day holds, ATR-2× stops) or Intraday (same-day, ATR-1.5× stops). Affects stop distances, position sizing, and which indicators the pipeline emphasises. VWAP is only used in Intraday mode.",
               },
               {
+                label: "Sector Breadth",
+                desc: "Slider 1–14. Controls how many leading sector ETFs contribute stocks to the candidate universe. 1 = single strongest sector only (~10–15 stocks, very focused). 3 = default (~40–65 stocks, good balance of focus and variety). 14 = all sectors (~100+ stocks, same as old static screener with no rotation bias).",
+              },
+              {
                 label: "Custom Watchlist",
-                desc: "Comma-separated tickers, e.g. AAPL, NVDA, TSLA. When populated, the auto-screener is completely bypassed — the exact tickers you enter go straight to the four analysis agents. Leave empty to use the full ~100-stock auto-screener.",
+                desc: "Comma-separated tickers, e.g. AAPL, NVDA, TSLA. When populated, the ETF-first auto-screener is completely bypassed — the exact tickers you enter go straight to the four analysis agents. Leave empty to use the ETF-first sector screener.",
               },
               {
                 label: "Paper Trading Mode",
@@ -609,14 +688,14 @@ export default function GuidePage() {
         <Card className="space-y-4 text-sm">
           <div className="space-y-2">
             {[
-              { icon: ShieldCheck, label: "Screener",            color: "text-blue-400",   desc: "Filters ~100 stocks → top 20% RS rank (~15–20 tickers). No LLM, pure math." },
-              { icon: Globe,       label: "Sector Rotation",    color: "text-sky-400",    desc: "Ranks 11 sector ETFs by RS + today's news (Haiku). Keeps only candidates from top 5 sectors. Result cached 4h." },
-              { icon: Activity,    label: "Technical Agent",    color: "text-indigo-400", desc: "RSI, MACD, ADX, BB Squeeze, Breakout Score, Swing Levels, MTF alignment → Haiku scores 0–1. Cached 2h." },
+              { icon: ShieldCheck, label: "Screener",            color: "text-blue-400",   desc: "Ranks 14 sector ETFs → builds dynamic stock pool from top N sectors (~40–65 tickers) → filters by price, volume, ATR, RS rank → ~10–20 final candidates. No LLM, pure math." },
+              { icon: Globe,       label: "Sector Rotation",    color: "text-sky-400",    desc: "Re-ranks top sectors by RS + today's Finnhub news (Haiku). Removes candidates from lagging sectors. Result cached 4h." },
+              { icon: Activity,    label: "Technical Agent",    color: "text-indigo-400", desc: "RSI, MACD, ADX, EMA150 distance, day streak, BB Squeeze, Breakout Score, Swing Levels, MTF alignment → Haiku scores 0–1. Cached 2h." },
               { icon: BarChart2,   label: "Fundamental Agent",  color: "text-violet-400", desc: "P/E, revenue growth, FCF yield, margins via yfinance → Haiku scores 0–1. Cached 24h." },
               { icon: TrendingUp,  label: "Sentiment Agent",    color: "text-pink-400",   desc: "Finnhub news + ApeWisdom Reddit mentions → Haiku scores 0–1. Cached 30min." },
               { icon: Zap,         label: "Catalyst Agent",     color: "text-orange-400", desc: "Earnings dates, recent news events → Haiku scores 0–1. Cached 4h." },
               { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "ATR-based stops (2× swing, 1.5× intraday), Kelly position sizing capped at 5%. Pure math." },
-              { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF data → Haiku produces final BUY/SELL/SKIP with entry, stop, target. Top N returned." },
+              { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF data → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
             ].map(({ icon: Icon, label, color, desc }, i, arr) => (
               <div key={label} className="flex gap-3">
                 <div className="flex flex-col items-center">
@@ -634,7 +713,7 @@ export default function GuidePage() {
           </div>
           <div className="bg-secondary/50 rounded-lg p-3 flex items-center gap-2 text-xs text-muted-foreground">
             <Clock className="h-3.5 w-3.5 flex-shrink-0" />
-            On a warm cache: ~1–2 Haiku calls (sector + synthesizer only). Cold run: ~6 calls &lt;$0.01. Full run time: 1–3 min.
+            Typical cost: ~$0.026/run (4 Haiku + 1 Sonnet call). ~$0.40/month for daily use. On warm cache: sector + synthesizer only (~$0.005). Full cold run time: 1–3 min.
           </div>
         </Card>
       </Section>
