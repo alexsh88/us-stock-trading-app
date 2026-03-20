@@ -223,13 +223,15 @@ def _calc_bb_squeeze(close: pd.Series, high: pd.Series, low: pd.Series) -> dict:
     bb_upper = sma20 + 2 * std20
     bb_lower = sma20 - 2 * std20
 
-    # Keltner Channel (EMA20, ATR10, 1.5x)
+    # Keltner Channel — EMA(20) ± 2×Wilder's ATR(10)
+    # Using Wilder's smoothed ATR (same as rest of system) and 2× multiplier
+    # so the squeeze fires only when BBs are truly compressed, not just slightly inside.
     ema20 = close.ewm(span=20, adjust=False).mean()
     prev_close = close.shift(1)
     tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
-    atr10 = tr.rolling(10).mean()
-    kc_upper = ema20 + 1.5 * atr10
-    kc_lower = ema20 - 1.5 * atr10
+    atr10 = tr.ewm(alpha=1.0 / 10, adjust=False).mean()  # Wilder's smoothed
+    kc_upper = ema20 + 2.0 * atr10
+    kc_lower = ema20 - 2.0 * atr10
 
     squeeze = (bb_upper < kc_upper) & (bb_lower > kc_lower)
     is_squeeze = bool(squeeze.iloc[-1])
@@ -283,6 +285,153 @@ def _check_volume_breakout(
         "breakout_details": "; ".join(details),
         "vol_ratio": vol_ratio,
     }
+
+
+def _calc_anchored_vwap(
+    close: pd.Series, high: pd.Series, low: pd.Series, volume: pd.Series
+) -> dict:
+    """VWAP anchored to the most recent significant swing low.
+
+    Bullish structure is intact when price is above AVWAP.
+    Stop: AVWAP × 0.998 (small buffer below).
+    Priority in stop waterfall: between Fib retracement and Chandelier Exit.
+    """
+    try:
+        lookback = min(len(close), 60)
+        if lookback < 10:
+            return {}
+        seg_close = close.tail(lookback)
+        seg_high  = high.tail(lookback)
+        seg_low   = low.tail(lookback)
+        seg_vol   = volume.tail(lookback)
+
+        # Anchor = lowest close bar in the lookback window (significant swing low)
+        swing_low_idx = int(seg_close.values.argmin())
+        if swing_low_idx >= lookback - 1:
+            return {}  # swing low is today — no meaningful VWAP segment
+
+        tp_from_low  = ((seg_high + seg_low + seg_close) / 3).iloc[swing_low_idx:]
+        vol_from_low = seg_vol.iloc[swing_low_idx:]
+        cum_vol = float(vol_from_low.sum())
+        if cum_vol <= 0:
+            return {}
+
+        avwap = float((tp_from_low * vol_from_low).sum() / cum_vol)
+        if avwap <= 0:
+            return {}
+
+        return {
+            "avwap": round(avwap, 2),
+            "avwap_stop": round(avwap * 0.998, 2),
+            "price_above_avwap": float(close.iloc[-1]) > avwap,
+        }
+    except Exception:
+        return {}
+
+
+def _calc_weekly_swing_lows(close: pd.Series, low: pd.Series) -> dict:
+    """Resample daily bars to weekly and find the nearest weekly swing low below current price.
+
+    Weekly swing low = a week whose low is strictly below both adjacent weeks.
+    These are stronger structural stop levels than daily swing lows because
+    they absorb more noise and represent institutional demand zones.
+    """
+    try:
+        if not isinstance(close.index, pd.DatetimeIndex):
+            return {}
+        daily = pd.DataFrame({"close": close, "low": low})
+        weekly_low = daily["low"].resample("W").min().dropna()
+        if len(weekly_low) < 5:
+            return {}
+
+        lows_arr = weekly_low.values
+        swing_lows: list[float] = []
+        for i in range(1, len(lows_arr) - 1):
+            if lows_arr[i] < lows_arr[i - 1] and lows_arr[i] < lows_arr[i + 1]:
+                swing_lows.append(float(lows_arr[i]))
+
+        current = float(close.iloc[-1])
+        candidates = [sl for sl in swing_lows if sl < current]
+        if not candidates:
+            return {}
+        return {"weekly_structural_stop": round(max(candidates), 2)}
+    except Exception:
+        return {}
+
+
+def _calc_volume_profile(
+    close: pd.Series, high: pd.Series, low: pd.Series, volume: pd.Series,
+    lookback: int = 60, n_buckets: int = 20,
+) -> dict:
+    """OHLCV volume profile approximation: VPOC, Value Area High (VAH), Value Area Low (VAL).
+
+    Algorithm:
+    - Divide the price range of the last `lookback` bars into `n_buckets` equal bins.
+    - Assign each bar's volume to the bucket containing its typical price.
+    - VPOC = midpoint of highest-volume bucket.
+    - Value Area = expand from VPOC until 70% of total volume is covered.
+    - VAL = lower boundary, VAH = upper boundary.
+
+    Uses:
+    - VAL as stop for longs (closing below = trade structure invalidated)
+    - VAH as first target if above current price and R:R ≥ min_rr
+    - VPOC as a magnet / area of value
+    """
+    try:
+        n = min(len(close), lookback)
+        if n < 10:
+            return {}
+        seg_close = close.tail(n)
+        seg_high  = high.tail(n)
+        seg_low   = low.tail(n)
+        seg_vol   = volume.tail(n)
+
+        price_min = float(seg_low.min())
+        price_max = float(seg_high.max())
+        if price_max <= price_min:
+            return {}
+
+        bucket_size = (price_max - price_min) / n_buckets
+        buckets = [0.0] * n_buckets
+
+        typical = ((seg_high + seg_low + seg_close) / 3).values
+        vols = seg_vol.values
+        for tp, v in zip(typical, vols):
+            idx = min(int((tp - price_min) / bucket_size), n_buckets - 1)
+            buckets[idx] += float(v)
+
+        # VPOC
+        vpoc_idx = int(max(range(n_buckets), key=lambda i: buckets[i]))
+        vpoc = round(price_min + (vpoc_idx + 0.5) * bucket_size, 2)
+
+        # Value Area: expand from VPOC until 70% of total volume
+        total_vol = sum(buckets)
+        if total_vol <= 0:
+            return {}
+        target = total_vol * 0.70
+        lo_idx = hi_idx = vpoc_idx
+        accumulated = buckets[vpoc_idx]
+
+        while accumulated < target:
+            can_up   = hi_idx + 1 < n_buckets
+            can_down = lo_idx - 1 >= 0
+            if not can_up and not can_down:
+                break
+            up_vol   = buckets[hi_idx + 1] if can_up   else -1.0
+            down_vol = buckets[lo_idx - 1] if can_down else -1.0
+            if up_vol >= down_vol:
+                hi_idx += 1
+                accumulated += buckets[hi_idx]
+            else:
+                lo_idx -= 1
+                accumulated += buckets[lo_idx]
+
+        vah = round(price_min + (hi_idx + 1) * bucket_size, 2)
+        val = round(price_min + lo_idx * bucket_size, 2)
+
+        return {"vpoc": vpoc, "val": val, "vah": vah}
+    except Exception:
+        return {}
 
 
 def _classify_gap(open_: pd.Series, close: pd.Series, volume: pd.Series,
@@ -398,6 +547,15 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
     # Historical volatility percentile rank (position size throttle)
     hv_rank = _calc_hv_rank(close)
 
+    # Anchored VWAP (stop between Fib retracement and Chandelier)
+    avwap = _calc_anchored_vwap(close, high, low, volume)
+
+    # Weekly swing lows as structural stop levels
+    weekly_stops = _calc_weekly_swing_lows(close, low)
+
+    # Volume Profile: VPOC, VAL, VAH
+    vol_profile = _calc_volume_profile(close, high, low, volume)
+
     # Gap type classification (uses data already computed above)
     gap = _classify_gap(open_, close, volume, ema150_pct, streak)
 
@@ -422,6 +580,9 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
         **squeeze,
         **breakout,
         **fib,
+        **avwap,
+        **weekly_stops,
+        **vol_profile,
         **gap,
     }
 

@@ -139,6 +139,20 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                                 stop_method = f"{fib_label}(${level:.2f})"
                                 break
 
+                # 1.7. Anchored VWAP stop (price above AVWAP = bullish structure intact)
+                # Stop is placed just below the AVWAP (0.2% buffer already baked in).
+                # Only applies when price is within 3% above AVWAP — otherwise too far away
+                # to be a meaningful nearby support level.
+                if stop_loss_price is None:
+                    avwap_stop = tech.get("avwap_stop")
+                    avwap      = tech.get("avwap")
+                    if (
+                        avwap_stop and avwap and avwap_stop < current_price
+                        and (current_price - avwap) / current_price * 100 <= 3.0
+                    ):
+                        stop_loss_price = round(avwap_stop, 2)
+                        stop_method = f"AVWAP(${avwap:.2f})"
+
                 # 2. Chandelier Exit (swing mode — ratchets up with price)
                 if stop_loss_price is None and mode == "swing":
                     chandelier = calculate_chandelier_stop(hist, period=10, multiplier=2.5)
@@ -234,11 +248,15 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                         if _try_target(tech.get(piv_key) or 0, piv_label):
                             break
 
-                # 4. Clustered swing resistance (most-touched S/R level)
+                # 4. Volume Profile Value Area High (VAH) — institutional supply zone
+                if target_price == min_target_price:
+                    _try_target(tech.get("vah") or 0, "VolumeProfileVAH")
+
+                # 5. Clustered swing resistance (most-touched S/R level)
                 if target_price == min_target_price and clustered_resistance:
                     _try_target(clustered_resistance, "ClusteredResist")
 
-                # 5. Most-recent swing resistance (original fallback)
+                # 6. Most-recent swing resistance (original fallback)
                 if target_price == min_target_price and swing_resistance:
                     _try_target(swing_resistance, "SwingResist")
 
