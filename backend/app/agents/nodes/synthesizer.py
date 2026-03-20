@@ -40,7 +40,8 @@ Confidence score meaning (use the FULL range):
 0.60-0.74: Mixed signals or marginal setup — only BUY if R:R is compelling.
 Below 0.60: SKIP regardless of setup.
 
-For any stock you would rate BUY with confidence 0.60-0.80, explicitly state the strongest argument AGAINST taking this trade before finalizing confidence. If the bear case is strong, reduce confidence or switch to SKIP."""
+For any stock you would rate BUY with confidence 0.60-0.80, explicitly state the strongest argument AGAINST taking this trade before finalizing confidence. If the bear case is strong, reduce confidence or switch to SKIP.
+Gap context: breakaway gap (>1.5% from base, high volume) = continuation signal, only 35% fill → boost confidence. exhaustion gap (>1.5% after extended trend, high volume) = 75% fill risk → penalise -0.10 confidence. common gap = neutral. none = no gap."""
 
 SYNTHESIZER_PROMPT = """Analyze these {count} stocks for {mode} trading and decide which to trade.
 
@@ -119,9 +120,13 @@ def _build_ticker_block(ticker: str, state: dict[str, Any], current_price: float
 
     hist_context = _fetch_historical_context(ticker, state)
 
+    gap_type = tech.get("gap_type", "none")
+    gap_pct  = tech.get("gap_pct", 0.0)
+    gap_str  = f"{gap_type}({gap_pct:+.1f}%)" if gap_type != "none" else "none"
+
     return (
         f"=== {ticker} @ ${current_price:.2f} ===\n"
-        f"Technical: {tech.get('score', 0.5):.2f} | ADX={adx:.1f}({regime}) MTF={mtf} | {tech.get('reasoning', 'N/A')[:120]}\n"
+        f"Technical: {tech.get('score', 0.5):.2f} | ADX={adx:.1f}({regime}) MTF={mtf} Gap={gap_str} | {tech.get('reasoning', 'N/A')[:120]}\n"
         f"Fundamental: {fund.get('score', 0.5):.2f} | {fund.get('reasoning', 'N/A')[:120]}\n"
         f"Sentiment: {sent.get('score', 0.5):.2f} | {sent.get('reasoning', 'N/A')[:80]}\n"
         f"Catalyst: {cat.get('score', 0.5):.2f} | {cat.get('reasoning', 'N/A')[:80]}\n"

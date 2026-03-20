@@ -66,13 +66,23 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
         logger.info("Regime sizing reduction applied", multiplier=regime_sizing, reason=regime.get("reason", ""))
 
     try:
-        # Batch download all tickers — with circuit breaker fallback chain
+        # Batch download all tickers + SPY (needed for beta computation)
         from app.services.data_resilience import fetch_ohlcv_with_fallback
-        all_hist, data_source = fetch_ohlcv_with_fallback(tickers, period="1mo")
+        dl_tickers = list(tickers) + (["SPY"] if "SPY" not in tickers else [])
+        all_hist, data_source = fetch_ohlcv_with_fallback(dl_tickers, period="1mo")
         if all_hist is None:
             return {"risk_metrics": {}, "errors": ["risk_manager: all data sources failed"]}
         if data_source != "yfinance":
             logger.info("Risk manager using fallback data source", source=data_source)
+
+        # Pre-compute SPY daily returns for beta calculation
+        spy_returns: pd.Series | None = None
+        try:
+            spy_close = all_hist["SPY"]["Close"].squeeze().dropna()
+            if len(spy_close) >= 10:
+                spy_returns = spy_close.pct_change().dropna()
+        except Exception:
+            pass
 
         metrics: dict[str, Any] = {}
 
@@ -159,6 +169,25 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                 avg_win = stop_distance * min_rr
                 kelly_pct = kelly_position_size(0.50, avg_win, stop_distance)
 
+                # ── Beta-adjusted position sizing ─────────────────────────────────
+                # High-beta stocks get proportionally smaller positions so that
+                # dollar-risk per trade is normalized across different vol regimes.
+                # floor at 0.5 prevents over-sizing on low-beta defensive stocks.
+                beta = 1.0
+                if spy_returns is not None:
+                    try:
+                        stock_close = hist["Close"].squeeze().dropna()
+                        stock_returns = stock_close.pct_change().dropna()
+                        s_aligned, spy_aligned = stock_returns.align(spy_returns, join="inner")
+                        if len(s_aligned) >= 10:
+                            cov = float(s_aligned.cov(spy_aligned))
+                            var_spy = float(spy_aligned.var())
+                            if var_spy > 0:
+                                beta = round(cov / var_spy, 2)
+                    except Exception:
+                        pass
+                kelly_pct = kelly_pct / max(beta, 0.5)
+
                 # ── HV percentile position size throttle ─────────────────────────
                 # High-volatility regimes require smaller position sizes.
                 # hv_rank=0 means quietest 10th percentile; 100=most volatile.
@@ -228,6 +257,7 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                     "min_rr": min_rr,
                     "regime_sizing": regime_sizing,
                     "hv_rank": hv_rank,
+                    "beta": beta,
                     "pattern_name": pat_name,
                     "pattern_strength": pat_strength,
                 }

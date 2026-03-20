@@ -285,11 +285,53 @@ def _check_volume_breakout(
     }
 
 
+def _classify_gap(open_: pd.Series, close: pd.Series, volume: pd.Series,
+                  ema150_pct: float | None, streak: int) -> dict:
+    """Classify the morning gap relative to prior close.
+
+    Types and their documented fill rates:
+      none       — gap < 0.3%: no meaningful gap
+      common     — 0.3-1.5%: fills ~90% of the time, low signal value
+      breakaway  — > 1.5% out of a base with volume: continuation (35% fill)
+      exhaustion — > 1.5% after extended trend with volume: fade risk (75% fill)
+    """
+    if len(close) < 2 or open_.empty:
+        return {"gap_type": "none", "gap_pct": 0.0}
+
+    prev_close = float(close.iloc[-2])
+    today_open = float(open_.iloc[-1])
+    if prev_close <= 0:
+        return {"gap_type": "none", "gap_pct": 0.0}
+
+    gap_pct = (today_open - prev_close) / prev_close * 100
+    abs_gap = abs(gap_pct)
+
+    avg_vol = float(volume.tail(20).mean()) if len(volume) >= 20 else float(volume.mean())
+    vol_elevated = avg_vol > 0 and float(volume.iloc[-1]) >= 1.5 * avg_vol
+
+    if abs_gap < 0.3:
+        return {"gap_type": "none", "gap_pct": round(gap_pct, 2)}
+    if abs_gap < 1.5:
+        return {"gap_type": "common", "gap_pct": round(gap_pct, 2)}
+
+    # Large gap — breakaway or exhaustion
+    overextended = (
+        (ema150_pct is not None and ema150_pct > 20) or   # far above 150-EMA
+        (gap_pct > 0 and streak >= 5)                      # gap after 5+ up days
+    )
+    if overextended and vol_elevated:
+        return {"gap_type": "exhaustion", "gap_pct": round(gap_pct, 2)}
+    if vol_elevated:
+        return {"gap_type": "breakaway", "gap_pct": round(gap_pct, 2)}
+    return {"gap_type": "common", "gap_pct": round(gap_pct, 2)}
+
+
 def _calc_indicators(hist: pd.DataFrame) -> dict:
     close = hist["Close"].squeeze()
     high = hist["High"].squeeze()
     low = hist["Low"].squeeze()
     volume = hist["Volume"].squeeze()
+    open_ = hist["Open"].squeeze() if "Open" in hist.columns else pd.Series(dtype=float)
     current_price = float(close.iloc[-1])
 
     # RSI-14
@@ -356,6 +398,9 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
     # Historical volatility percentile rank (position size throttle)
     hv_rank = _calc_hv_rank(close)
 
+    # Gap type classification (uses data already computed above)
+    gap = _classify_gap(open_, close, volume, ema150_pct, streak)
+
     return {
         "price": current_price,
         "rsi": rsi,
@@ -377,6 +422,7 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
         **squeeze,
         **breakout,
         **fib,
+        **gap,
     }
 
 
