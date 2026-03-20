@@ -193,8 +193,10 @@ export default function GuidePage() {
               <div>
                 <p className="font-medium mb-1">Position Size %</p>
                 <p className="text-muted-foreground">
-                  Kelly-criterion sizing, capped at 5% of portfolio per trade. Higher
-                  confidence = larger recommended size.
+                  Kelly-criterion sizing, capped at 5% of portfolio per trade. Reduced
+                  by beta (high-beta stocks get smaller positions), HV rank (unusually
+                  volatile = cut to 50–75%), and the market regime multiplier (risk-off
+                  environments shrink all sizes proportionally).
                 </p>
               </div>
               <div>
@@ -640,13 +642,21 @@ export default function GuidePage() {
           </div>
         </Card>
 
-        <Callout icon={BarChart2} color="yellow" title="Historical Volatility Rank — position size throttle">
-          Before finalising position size, the risk manager computes the stock&apos;s
-          Historical Volatility percentile rank over the past 252 days (21-day rolling HV
-          ranked against itself). Stocks in the <strong>top 20% (HV rank ≥ 80)</strong> get
-          Kelly sizing cut to 50% — they are unusually volatile right now and the wider stops
-          would imply outsized risk. Stocks in the <strong>40–80th percentile</strong> are
-          cut to 75%. Below 40th: full Kelly applies.
+        <Callout icon={BarChart2} color="yellow" title="Position size throttles — HV rank + beta">
+          Two additional size reductions stack on top of Kelly: (1) <strong>HV rank</strong> —
+          Historical Volatility percentile over 252 days. Top 20% (rank ≥ 80) cuts size to 50%;
+          40–80th percentile cuts to 75%. (2) <strong>Beta adjustment</strong> — Kelly fraction
+          is divided by max(β, 0.5), so a stock with β = 1.8 gets a position 1.8× smaller than
+          a β = 1.0 stock at the same risk %. Floor at 0.5 prevents over-sizing low-beta defensives.
+          Both throttles apply independently and compound.
+        </Callout>
+
+        <Callout icon={Info} color="blue" title="Gap type — breakaway vs exhaustion">
+          The morning gap (today&apos;s open vs yesterday&apos;s close) is classified before the
+          synthesizer runs. A <strong>breakaway gap</strong> (&gt;1.5% from a base, with high volume)
+          fills only 35% of the time — the synthesizer boosts confidence. An <strong>exhaustion gap</strong>
+          (&gt;1.5% after an extended trend, with high volume) fills 75% of the time — penalises
+          confidence by −0.10. A <strong>common gap</strong> (0.3–1.5%) is treated as noise.
         </Callout>
       </Section>
 
@@ -743,10 +753,12 @@ export default function GuidePage() {
       <Section id="rs" icon={TrendingUp} title="Relative Strength Rank">
         <Card className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            At the screener stage, every stock&apos;s 1-month return relative to SPY is computed.
+            At the screener stage, every stock&apos;s <strong>6-month return relative to SPY</strong> is computed.
             Only stocks in the <strong>top 20% (80th percentile)</strong> of that RS ranking enter the
             analysis pipeline. This implements the Jegadeesh-Titman momentum factor — one of the
-            most consistently validated effects in academic finance.
+            most consistently validated effects in academic finance. A 6-month window is used
+            rather than 1-month because it captures more stable momentum and reduces noise from
+            short-term mean-reversion.
           </p>
           <div className="bg-secondary/50 rounded-lg p-4 space-y-2 text-sm">
             <p className="font-medium">Why top 20% specifically?</p>
@@ -912,10 +924,10 @@ export default function GuidePage() {
               { icon: Globe,       label: "Sector Rotation",    color: "text-sky-400",    desc: "Re-ranks top sectors by RS + today's Finnhub news (Haiku). Removes candidates from lagging sectors. Result cached 4h." },
               { icon: Activity,    label: "Technical Agent",    color: "text-indigo-400", desc: "RSI, MACD, ADX, EMA150 distance, day streak, BB Squeeze, Breakout Score, Swing Levels, MTF alignment + 7 chart patterns (BullFlag, DblBottom, AscTriangle, VCP, Cup&Handle, InvH&S, H&S) → Haiku scores 0–1. Cached 2h." },
               { icon: BarChart2,   label: "Fundamental Agent",  color: "text-violet-400", desc: "P/E, revenue growth, FCF yield, margins via yfinance → Haiku scores 0–1. Cached 24h." },
-              { icon: TrendingUp,  label: "Sentiment Agent",    color: "text-pink-400",   desc: "Finnhub news + ApeWisdom Reddit mentions → Haiku scores 0–1. Cached 30min." },
-              { icon: Zap,         label: "Catalyst Agent",     color: "text-orange-400", desc: "Earnings dates, recent news events → Haiku scores 0–1. Cached 4h." },
-              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop waterfall: pattern (≥0.65) → Fib retracement → Chandelier Exit → ATR. Target waterfall: pattern → Fib 1.272×/1.618× → Weekly R1/R2 → clustered resistance → min R:R floor. Kelly sizing throttled by HV rank. Pure math." },
-              { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF data → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
+              { icon: TrendingUp,  label: "Sentiment Agent",    color: "text-pink-400",   desc: "Finnhub headlines + ApeWisdom Reddit mentions + StockTwits bullish/bearish ratio → Haiku scores 0–1. Cached 30min." },
+              { icon: Zap,         label: "Catalyst Agent",     color: "text-orange-400", desc: "SEC EDGAR 8-K/Form 4/SC 13D filings + earnings dates + Put/Call ratio + short interest % of float (squeeze potential) → Haiku scores 0–1. Cached 4h." },
+              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop waterfall: pattern (≥0.65) → Fib retracement → Chandelier Exit → ATR. Target waterfall: pattern → Fib 1.272×/1.618× → Weekly R1/R2 → clustered resistance → min R:R floor. Kelly sizing throttled by beta (high-beta = smaller size) and HV rank. Pure math." },
+              { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF + gap type → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Sector concentration cap (max 2 per sector). Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
             ].map(({ icon: Icon, label, color, desc }, i, arr) => (
               <div key={label} className="flex gap-3">
                 <div className="flex flex-col items-center">
