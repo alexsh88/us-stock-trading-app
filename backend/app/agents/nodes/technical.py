@@ -668,13 +668,14 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
             logger.info("Technical node using DB pre-computed values",
                         warm=len(warm_tickers), cold=len(cold_tickers))
 
-        # Download 3mo for warm tickers; 1y for cold tickers (EMA150 warmup needed)
+        # Download 1y for all tickers — patterns (cup_handle, double_bottom, etc.) need
+        # enough history to detect multi-month bases. 3mo was insufficient for warm tickers.
         all_data_warm = None
         all_data_cold = None
         data_source = "yfinance"
 
         if warm_tickers:
-            all_data_warm, data_source = fetch_ohlcv_with_fallback(warm_tickers, period="3mo")
+            all_data_warm, data_source = fetch_ohlcv_with_fallback(warm_tickers, period="1y")
         if cold_tickers:
             all_data_cold, src = fetch_ohlcv_with_fallback(cold_tickers, period="1y")
             if data_source == "yfinance":

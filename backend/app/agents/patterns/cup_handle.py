@@ -58,8 +58,8 @@ def detect_cup_handle(
     arr_v = volume.values
     current_price = float(arr_c[-1])
 
-    # Scan for left lip in the last 6 months of daily bars (~130 bars)
-    scan_start = max(0, n - 130)
+    # Scan for left lip across all available data — supports multi-month bases
+    scan_start = 0
 
     for left_lip_idx in range(scan_start, n - min_cup_weeks * 5):
         left_lip_price = float(arr_h[left_lip_idx])
