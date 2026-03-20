@@ -20,10 +20,11 @@ ETF_SECTOR_STOCKS: dict[str, list[str]] = {
         "PANW", "SNPS", "CDNS", "NOW", "SNOW", "PLTR",
     ],
     # XLE — Energy
+    # HES acquired by Chevron (Oct 2024), MRO acquired by ConocoPhillips (Nov 2024) — removed
     "XLE": [
         "XOM", "CVX", "COP", "EOG", "SLB", "MPC", "VLO", "PSX",
-        "OXY", "HAL", "DVN", "FANG", "BKR", "MRO", "HES", "APA",
-        "AR", "RRC",
+        "OXY", "HAL", "DVN", "FANG", "BKR", "APA",
+        "AR", "RRC", "PR", "CTRA",
     ],
     # XLF — Financials
     "XLF": [
