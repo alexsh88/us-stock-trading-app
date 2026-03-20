@@ -1040,6 +1040,16 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                 "weekly_r2": ind.get("weekly_r2"),
                 "weekly_s1": ind.get("weekly_s1"),
                 "weekly_s2": ind.get("weekly_s2"),
+                # Phase 3: AVWAP, Volume Profile, Weekly Swing Lows, Gap
+                "avwap": ind.get("avwap"),
+                "avwap_stop": ind.get("avwap_stop"),
+                "price_above_avwap": ind.get("price_above_avwap"),
+                "vpoc": ind.get("vpoc"),
+                "val": ind.get("val"),
+                "vah": ind.get("vah"),
+                "weekly_structural_stop": ind.get("weekly_structural_stop"),
+                "gap_type": ind.get("gap_type"),
+                "gap_pct": ind.get("gap_pct"),
             })
 
         logger.info("Technical node complete", tickers_analyzed=len(scores))

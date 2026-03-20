@@ -93,7 +93,17 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_to
                     "breakout_score", "breakout_details", "vol_ratio",
                     "swing_resistance", "swing_support",
                     "rsi", "macd_signal", "bb_position", "vwap_relation",
+                    # Phase 3 additions
+                    "avwap", "avwap_stop", "price_above_avwap",
+                    "vpoc", "val", "vah",
+                    "weekly_structural_stop",
+                    "gap_type", "gap_pct",
                 ) if k in tech_meta} or {}
+                # Risk metrics for display (beta from risk_manager)
+                risk_meta = final_state.get("risk_metrics", {}).get(sig_data["ticker"], {})
+                for k in ("beta", "hv_rank", "regime_sizing"):
+                    if risk_meta.get(k) is not None:
+                        indicators[k] = risk_meta[k]
                 # Attach stop/target method labels so the UI can explain the levels
                 indicators["target_method"] = sig_data.get("target_method", "min_rr_floor")
                 indicators["stop_loss_method"] = sig_data.get("stop_loss_method", "")
