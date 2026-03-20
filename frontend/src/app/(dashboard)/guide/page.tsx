@@ -894,6 +894,24 @@ export default function GuidePage() {
             because the mode is part of the cache key. All other nodes are mode-agnostic and share
             the same daily cache.
           </Callout>
+          <Callout icon={Database} color="indigo" title="Nightly data infrastructure — 2 background jobs">
+            <ul className="text-sm space-y-2 mt-1 list-none">
+              <li>
+                <strong>4:35 PM ET — OHLCV ingest + precomputed technicals</strong> — fetches today&apos;s
+                candle for the full universe, refreshes the TimescaleDB continuous aggregate
+                (<code>ohlcv_daily_candles</code>), then bulk-upserts SMA20/SMA50/VWAP20/EMA150 into
+                <code>precomputed_technicals</code>. The technical node reads these values for warm tickers
+                instead of recalculating them from a full 1-year download every run.
+              </li>
+              <li>
+                <strong>6:00 AM ET — News embedding backfill</strong> — any unembedded headlines in
+                <code>news_embeddings</code> are sent to OpenAI <code>text-embedding-3-small</code> (1536-dim
+                vectors, ~$0.000005/day). The synthesizer then does a cosine similarity search (pgvector
+                <code>&lt;=&gt;</code> operator) to find the top-5 most semantically similar past headlines that have
+                completed T+5 outcomes — and injects them into every LLM ticker block as historical context.
+              </li>
+            </ul>
+          </Callout>
         </Card>
       </Section>
 
@@ -963,7 +981,7 @@ export default function GuidePage() {
               { icon: TrendingUp,  label: "Sentiment Agent",    color: "text-pink-400",   desc: "Finnhub headlines + ApeWisdom Reddit mentions + StockTwits bullish/bearish ratio → Haiku scores 0–1. Cached 30min." },
               { icon: Zap,         label: "Catalyst Agent",     color: "text-orange-400", desc: "SEC EDGAR 8-K/Form 4/SC 13D filings + earnings dates + Put/Call ratio + short interest % of float (squeeze potential) → Haiku scores 0–1. Cached 4h." },
               { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop waterfall: pattern (≥0.65) → Fib retracement → AVWAP → Chandelier Exit → ATR. Dual targets: T1 (first resistance) + T2 (next level above T1). Exit strategy: 50% at T1 (stop→breakeven), 25% at T2, 25% trails chandelier/PSAR. Kelly sizing throttled by beta, HV rank, and regime multiplier." },
-              { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF + gap type → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Sector concentration cap (max 2 per sector). Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
+              { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF + gap type + historical context (top-5 semantically similar past headlines with T+5 outcomes via pgvector) → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Sector concentration cap (max 2 per sector). Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
             ].map(({ icon: Icon, label, color, desc }, i, arr) => (
               <div key={label} className="flex gap-3">
                 <div className="flex flex-col items-center">
