@@ -298,7 +298,7 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
         pinned_sectors: list[str] = state.get("pinned_sectors", [])
 
         if pinned_sectors:
-            # User has pinned specific sectors — skip auto-ranking entirely
+            # User has pinned specific sectors — always respect that, skip scanner
             valid_pinned = [e for e in pinned_sectors if e in ETF_SECTOR_STOCKS]
             seen: set[str] = set()
             dynamic: list[str] = []
@@ -311,21 +311,29 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
             logger.info("ETF-first universe built from pinned sectors",
                         pinned=valid_pinned, universe_size=len(dynamic))
         else:
-            leading_etfs = _rank_sector_etfs(top_n=sector_top_n)
-            if leading_etfs:
-                seen = set()
-                dynamic = []
-                for etf in leading_etfs:
-                    for t in ETF_SECTOR_STOCKS.get(etf, []):
-                        if t not in seen:
-                            seen.add(t)
-                            dynamic.append(t)
-                all_tickers = dynamic + ["SPY"]
-                logger.info("ETF-first universe built",
-                            leading_etfs=leading_etfs, universe_size=len(dynamic))
+            # Try IBKR real-time scanner first; fall back to ETF auto-ranking
+            from app.services.ibkr_scanner_service import scan_candidates
+            ibkr_tickers = scan_candidates(mode)
+
+            if ibkr_tickers:
+                all_tickers = ibkr_tickers + ["SPY"]
             else:
-                all_tickers = FALLBACK_UNIVERSE  # includes SPY
-                logger.warning("ETF rank unavailable — using static fallback universe")
+                # ETF auto-ranking (existing logic)
+                leading_etfs = _rank_sector_etfs(top_n=sector_top_n)
+                if leading_etfs:
+                    seen = set()
+                    dynamic = []
+                    for etf in leading_etfs:
+                        for t in ETF_SECTOR_STOCKS.get(etf, []):
+                            if t not in seen:
+                                seen.add(t)
+                                dynamic.append(t)
+                    all_tickers = dynamic + ["SPY"]
+                    logger.info("ETF-first universe built",
+                                leading_etfs=leading_etfs, universe_size=len(dynamic))
+                else:
+                    all_tickers = FALLBACK_UNIVERSE  # includes SPY
+                    logger.warning("ETF rank unavailable — using static fallback universe")
 
         # Batch download all tickers — with circuit breaker fallback chain
         from app.services.data_resilience import fetch_ohlcv_with_fallback
