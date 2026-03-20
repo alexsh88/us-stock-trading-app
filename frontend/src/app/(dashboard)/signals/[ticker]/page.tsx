@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { ArrowLeft, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, Minus, Info } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useTradingStore, TechnicalIndicators } from "@/store/trading-store";
@@ -36,6 +36,77 @@ function IndicatorPill({ label, value, positive }: { label: string; value: strin
     <div className={`border rounded-lg px-3 py-2 text-center ${color}`}>
       <p className="text-xs opacity-70 mb-0.5">{label}</p>
       <p className="text-sm font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function formatStopReason(method: string | null | undefined): { label: string; detail: string } {
+  if (!method) return { label: "ATR-based", detail: "2× average daily range below entry" };
+  if (method.startsWith("Fib")) {
+    const level = method.match(/Fib(\d+\.?\d*)/)?.[1];
+    const price = method.match(/\$([\d.]+)/)?.[1];
+    return {
+      label: `Fib ${level}% retracement`,
+      detail: `Price is above the ${level}% retracement${price ? ` at $${price}` : ""} — stop just below this natural support zone`,
+    };
+  }
+  if (method.startsWith("Chandelier")) {
+    return { label: "Chandelier Exit", detail: "Highest close of last 10 bars minus 2.5× ATR — trails up with price automatically" };
+  }
+  if (method.startsWith("ATR")) {
+    const mult = method.match(/ATR-([\d.]+)x/)?.[1] ?? "2";
+    return { label: `ATR ${mult}× stop`, detail: `${mult}× the average true range below entry — widens in volatile markets, tightens in calm ones` };
+  }
+  // Pattern invalidation: "double_bottom-invalidation(str=0.72)"
+  const patMatch = method.match(/^(.+)-invalidation\(str=([\d.]+)\)$/);
+  if (patMatch) {
+    const patName = patMatch[1].replace(/_/g, " ");
+    const str = parseFloat(patMatch[2]);
+    return {
+      label: `${patName} invalidation`,
+      detail: `Below the pattern lows (strength ${(str * 100).toFixed(0)}%) — if price returns here the setup has failed`,
+    };
+  }
+  return { label: method, detail: "" };
+}
+
+function formatTargetReason(method: string | null | undefined, rr: number | null | undefined): { label: string; detail: string } {
+  const rrStr = rr?.toFixed(1) ?? "2.0";
+  if (!method || method === "min_rr_floor") return { label: "R:R floor", detail: `No stronger level found — target set at the minimum ${rrStr}× reward-to-risk` };
+  if (method.startsWith("pattern-")) {
+    const name = method.replace("pattern-", "").replace(/_/g, " ");
+    return { label: `${name} projection`, detail: "Classic measured move — pattern height projected above the breakout level" };
+  }
+  if (method === "Fib127") return { label: "Fib 1.272× extension", detail: "First Fibonacci extension above the prior swing — common first institutional take-profit zone" };
+  if (method === "Fib162") return { label: "Fib 1.618× extension", detail: "Golden ratio extension — strong institutional target, often marks end of an impulsive move" };
+  if (method === "WeeklyR1") return { label: "Weekly R1 pivot", detail: "First weekly resistance (PP×2 − prior low) — self-fulfilling level widely watched by institutions" };
+  if (method === "WeeklyR2") return { label: "Weekly R2 pivot", detail: "Second weekly resistance (PP + prior range) — extended target for strong trending moves" };
+  if (method === "ClusteredResist") return { label: "Clustered resistance", detail: "Price zone with multiple prior pivot highs — the strongest nearby supply area" };
+  if (method === "SwingResist") return { label: "Swing resistance", detail: "Most recent pivot high on the daily chart" };
+  return { label: method, detail: "" };
+}
+
+function LevelCard({
+  label, price, subLabel, reason, colorClass, borderClass,
+}: {
+  label: string; price: string; subLabel: string;
+  reason: { label: string; detail: string };
+  colorClass: string; borderClass: string;
+}) {
+  return (
+    <div className={`bg-card ${borderClass} rounded-lg p-4`}>
+      <p className={`text-xs uppercase tracking-wide mb-1 ${colorClass}`}>{label}</p>
+      <p className={`text-xl font-bold mb-1 ${colorClass}`}>{price}</p>
+      <p className="text-xs text-muted-foreground mb-2">{subLabel}</p>
+      <div className="border-t border-border pt-2 space-y-1">
+        <div className="flex items-center gap-1">
+          <Info className="h-3 w-3 text-muted-foreground shrink-0" />
+          <span className="text-xs font-medium text-foreground">{reason.label}</span>
+        </div>
+        {reason.detail && (
+          <p className="text-xs text-muted-foreground leading-relaxed pl-4">{reason.detail}</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -178,21 +249,28 @@ export default function SignalDetailPage() {
       </div>
 
       {/* Trade levels */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-card border border-border rounded-lg p-4 text-center">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-card border border-border rounded-lg p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Entry</p>
           <p className="text-xl font-bold text-foreground">${signal.entry_price?.toFixed(2)}</p>
+          <p className="text-xs text-muted-foreground mt-1">{signal.trading_mode} trade</p>
         </div>
-        <div className="bg-card border border-red-500/20 rounded-lg p-4 text-center">
-          <p className="text-xs text-red-400 uppercase tracking-wide mb-1">Stop Loss</p>
-          <p className="text-xl font-bold text-red-400">${signal.stop_loss_price?.toFixed(2)}</p>
-          <p className="text-xs text-muted-foreground mt-1">{signal.stop_loss_method}</p>
-        </div>
-        <div className="bg-card border border-green-500/20 rounded-lg p-4 text-center">
-          <p className="text-xs text-green-400 uppercase tracking-wide mb-1">Take Profit</p>
-          <p className="text-xl font-bold text-green-400">${signal.take_profit_price?.toFixed(2)}</p>
-          <p className="text-xs text-muted-foreground mt-1">R:R {signal.risk_reward_ratio?.toFixed(1)}x</p>
-        </div>
+        <LevelCard
+          label="Stop Loss"
+          price={`$${signal.stop_loss_price?.toFixed(2)}`}
+          subLabel={`−${signal.stop_loss_price && signal.entry_price ? ((signal.entry_price - signal.stop_loss_price) / signal.entry_price * 100).toFixed(1) : "?"}% from entry`}
+          reason={formatStopReason(signal.indicators?.stop_loss_method ?? signal.stop_loss_method)}
+          colorClass="text-red-400"
+          borderClass="border border-red-500/20"
+        />
+        <LevelCard
+          label="Take Profit"
+          price={`$${signal.take_profit_price?.toFixed(2)}`}
+          subLabel={`R:R ${signal.risk_reward_ratio?.toFixed(1)}×`}
+          reason={formatTargetReason(signal.indicators?.target_method, signal.risk_reward_ratio)}
+          colorClass="text-green-400"
+          borderClass="border border-green-500/20"
+        />
       </div>
 
       {/* Agent scores */}

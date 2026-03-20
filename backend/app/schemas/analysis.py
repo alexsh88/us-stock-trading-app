@@ -47,6 +47,8 @@ class TechnicalIndicators(BaseModel):
     macd_signal: Optional[str] = None      # "bullish" | "bearish"
     bb_position: Optional[str] = None
     vwap_relation: Optional[str] = None
+    stop_loss_method: Optional[str] = None  # e.g. "Fib61.8($142.30)", "Chandelier-2.5x"
+    target_method: Optional[str] = None     # e.g. "pattern-double_bottom", "WeeklyR1", "Fib127"
 
 
 class TradeSignalResponse(BaseModel):

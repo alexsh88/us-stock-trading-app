@@ -22,6 +22,8 @@ export interface TechnicalIndicators {
   macd_signal?: "bullish" | "bearish" | null;
   bb_position?: string | null;
   vwap_relation?: string | null;
+  stop_loss_method?: string | null;
+  target_method?: string | null;
 }
 
 export interface TradeSignal {

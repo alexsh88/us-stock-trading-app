@@ -91,7 +91,11 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_to
                     "breakout_score", "breakout_details", "vol_ratio",
                     "swing_resistance", "swing_support",
                     "rsi", "macd_signal", "bb_position", "vwap_relation",
-                ) if k in tech_meta} or None
+                ) if k in tech_meta} or {}
+                # Attach stop/target method labels so the UI can explain the levels
+                indicators["target_method"] = sig_data.get("target_method", "min_rr_floor")
+                indicators["stop_loss_method"] = sig_data.get("stop_loss_method", "")
+                indicators = indicators or None
 
                 signal = TradeSignal(
                     run_id=run.id,
