@@ -109,6 +109,7 @@ export default function GuidePage() {
           ["BB Squeeze", "#squeeze"],
           ["EMA 150 & Streak", "#ema150"],
           ["Chart Patterns", "#patterns"],
+          ["Stop & Target Logic", "#stoptarget"],
           ["Breakout Score", "#breakout"],
           ["RS Rank", "#rs"],
           ["Sector Rotation", "#sector"],
@@ -179,11 +180,12 @@ export default function GuidePage() {
               <div>
                 <p className="font-medium mb-1">Entry / Stop / Target</p>
                 <p className="text-muted-foreground">
-                  Entry = current price at analysis time. Stop = pattern-specific stop
-                  when a chart pattern is detected with strength ≥ 0.65; otherwise
-                  Chandelier Exit or ATR-based. Target = pattern measured-move target
-                  (or swing resistance / minimum R:R). The R:R ratio shows how many
-                  dollars you make for every dollar risked.
+                  Entry = current price at analysis time. Stop and target are chosen
+                  from a priority waterfall — pattern-specific levels first, then
+                  Fibonacci retracements/extensions, then Chandelier Exit or weekly
+                  pivot levels, then ATR as a fallback. The signal detail page shows
+                  a human-readable explanation of exactly which method was used and why.
+                  The R:R ratio shows how many dollars you make for every dollar risked.
                 </p>
               </div>
             </div>
@@ -472,13 +474,13 @@ export default function GuidePage() {
                 badge: "green",
                 when: "2–4 phases each with smaller % range AND lower volume than the prior phase. Final phase ≤10% range (Minervini)",
                 stop: "Below final contraction low",
-                target: "None fixed — use swing resistance",
+                target: "Measured move: pivot + (pivot − final contraction low)",
               },
               {
                 name: "Cup & Handle",
                 badge: "green",
                 when: "U-shaped base 6–26 weeks, 12–35% cup depth, lips within 5%, handle pullback 3–15% (O'Neil)",
-                stop: "7.5% below handle high (pivot)",
+                stop: "max(O'Neil 7.5% below pivot, ATR×2 below entry) — whichever is tighter",
                 target: "Pivot + cup depth",
               },
               {
@@ -511,11 +513,12 @@ export default function GuidePage() {
         </Card>
 
         <Callout icon={Info} color="indigo" title="Stop loss priority">
-          When a pattern is detected with strength ≥ 0.65, its specific stop price takes
-          priority over the Chandelier Exit and ATR-based stop. This gives tighter, more
-          meaningful risk levels — e.g. the Bull Flag stop sits just below the flag
-          consolidation, not an arbitrary ATR multiple away. Below 0.65 strength, the
-          Chandelier Exit is used (swing mode) or ATR-1.5× (intraday).
+          When a pattern is detected with strength ≥ 0.65, its specific invalidation stop
+          takes first priority. If no qualifying pattern exists, the pipeline looks for a
+          nearby Fibonacci retracement level (61.8%, 50%, or 38.2% of the prior swing) —
+          these are natural support zones that institutions watch. If price is not near a
+          retracement, the Chandelier Exit is used (swing mode) or ATR-1.5× (intraday).
+          See the <strong>Stop &amp; Target Logic</strong> section below for the full waterfall.
         </Callout>
 
         <Callout icon={CheckCircle2} color="green" title="Pattern strength score (0–1)">
@@ -523,6 +526,127 @@ export default function GuidePage() {
           cup depth in the ideal range, handle volume contraction, proximity to pivot, recency.
           Patterns below 0.42 are discarded as noise. Patterns above 0.65 influence stop/target.
           Patterns above 0.70 receive a score bonus from the technical LLM agent.
+        </Callout>
+      </Section>
+
+      {/* ── 5d. Stop & Target Logic ── */}
+      <Section id="stoptarget" icon={Target} title="Stop Loss & Target Logic">
+        <Card className="space-y-5">
+          <p className="text-sm text-muted-foreground">
+            Every signal&apos;s stop and target are chosen from a <strong>priority waterfall</strong> —
+            the pipeline picks the most meaningful available level, not a fixed formula.
+            The signal detail page displays a plain-English explanation of whichever
+            method was used (look for the <Info className="h-3 w-3 inline-block mx-0.5 text-muted-foreground" /> icon under each price).
+          </p>
+
+          <div className="space-y-4">
+            <div>
+              <p className="font-medium text-sm mb-2 text-red-400">Stop Loss — Priority Order</p>
+              <div className="space-y-2">
+                {[
+                  {
+                    n: "1",
+                    label: "Pattern invalidation",
+                    color: "bg-red-500/20 text-red-400",
+                    desc: "If a chart pattern is detected with strength ≥ 0.65, the stop is placed just below the pattern's defining lows — e.g. below both bottoms of a double bottom. The pattern has structurally failed if price returns to that level.",
+                  },
+                  {
+                    n: "2",
+                    label: "Fibonacci retracement",
+                    color: "bg-orange-500/20 text-orange-400",
+                    desc: "If price is within 5% above the 61.8%, 50%, or 38.2% retracement of the prior swing (deepest low → highest close), the stop is placed just below that level. These are the most-watched support zones by institutional traders.",
+                  },
+                  {
+                    n: "3",
+                    label: "Chandelier Exit",
+                    color: "bg-yellow-500/20 text-yellow-400",
+                    desc: "Swing mode: highest close of the last 10 bars minus 2.5× ATR(10). This level ratchets upward as price climbs — a trailing stop that stays tight during trending moves.",
+                  },
+                  {
+                    n: "4",
+                    label: "ATR-based stop",
+                    color: "bg-secondary text-muted-foreground",
+                    desc: "Fallback. Swing mode: 2× Wilder's ATR(14) below entry. Intraday mode: 1.5× ATR. Uses Wilder's smoothed ATR (EMA-based) which expands in volatile periods and tightens in calm ones.",
+                  },
+                ].map(({ n, label, color, desc }) => (
+                  <div key={n} className="flex gap-3 text-sm">
+                    <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${color}`}>{n}</div>
+                    <div>
+                      <p className="font-medium">{label}</p>
+                      <p className="text-muted-foreground">{desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-border pt-4">
+              <p className="font-medium text-sm mb-2 text-green-400">Target Price — Priority Order</p>
+              <div className="space-y-2">
+                {[
+                  {
+                    n: "1",
+                    label: "Pattern measured-move",
+                    color: "bg-green-500/20 text-green-400",
+                    desc: "Classic measured-move projection from the pattern. Bull Flag: pivot + pole height. Double Bottom: neckline + pattern height. VCP: pivot + (pivot − final contraction low). Cup & Handle: pivot + cup depth.",
+                  },
+                  {
+                    n: "2",
+                    label: "Fibonacci 1.272× extension",
+                    color: "bg-teal-500/20 text-teal-400",
+                    desc: "First Fibonacci extension above the prior swing high. A common first institutional take-profit zone — often where a move stalls before continuing.",
+                  },
+                  {
+                    n: "3",
+                    label: "Fibonacci 1.618× extension",
+                    color: "bg-cyan-500/20 text-cyan-400",
+                    desc: "Golden ratio extension. Marks the end of a full impulsive move. Strong institutional target, especially on breakouts from long bases.",
+                  },
+                  {
+                    n: "4",
+                    label: "Weekly R1 / R2 pivot",
+                    color: "bg-blue-500/20 text-blue-400",
+                    desc: "Floor-trader pivot points computed from the prior week's high, low, and close. R1 = 2×PP − prior low. R2 = PP + prior range. Self-fulfilling levels widely used by institutional desks.",
+                  },
+                  {
+                    n: "5",
+                    label: "Clustered resistance",
+                    color: "bg-indigo-500/20 text-indigo-400",
+                    desc: "Groups all recent swing highs within 1.5% of each other and picks the most-touched cluster midpoint. Multiple prior rejections at the same zone = strong supply.",
+                  },
+                  {
+                    n: "6",
+                    label: "Swing resistance",
+                    color: "bg-violet-500/20 text-violet-400",
+                    desc: "The single most recent pivot high on the daily chart. Used when no cluster is present.",
+                  },
+                  {
+                    n: "7",
+                    label: "Min R:R floor",
+                    color: "bg-secondary text-muted-foreground",
+                    desc: "Fallback. If no structural level gives the minimum reward-to-risk (2.0× swing, 1.5× intraday), the target is mathematically placed at the required distance. No level found — pure risk math.",
+                  },
+                ].map(({ n, label, color, desc }) => (
+                  <div key={n} className="flex gap-3 text-sm">
+                    <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${color}`}>{n}</div>
+                    <div>
+                      <p className="font-medium">{label}</p>
+                      <p className="text-muted-foreground">{desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Callout icon={BarChart2} color="yellow" title="Historical Volatility Rank — position size throttle">
+          Before finalising position size, the risk manager computes the stock&apos;s
+          Historical Volatility percentile rank over the past 252 days (21-day rolling HV
+          ranked against itself). Stocks in the <strong>top 20% (HV rank ≥ 80)</strong> get
+          Kelly sizing cut to 50% — they are unusually volatile right now and the wider stops
+          would imply outsized risk. Stocks in the <strong>40–80th percentile</strong> are
+          cut to 75%. Below 40th: full Kelly applies.
         </Callout>
       </Section>
 
@@ -790,7 +914,7 @@ export default function GuidePage() {
               { icon: BarChart2,   label: "Fundamental Agent",  color: "text-violet-400", desc: "P/E, revenue growth, FCF yield, margins via yfinance → Haiku scores 0–1. Cached 24h." },
               { icon: TrendingUp,  label: "Sentiment Agent",    color: "text-pink-400",   desc: "Finnhub news + ApeWisdom Reddit mentions → Haiku scores 0–1. Cached 30min." },
               { icon: Zap,         label: "Catalyst Agent",     color: "text-orange-400", desc: "Earnings dates, recent news events → Haiku scores 0–1. Cached 4h." },
-              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop priority: pattern-specific stop (if strength ≥ 0.65) → Chandelier Exit → ATR-based. Kelly position sizing capped at 5%. Pure math." },
+              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop waterfall: pattern (≥0.65) → Fib retracement → Chandelier Exit → ATR. Target waterfall: pattern → Fib 1.272×/1.618× → Weekly R1/R2 → clustered resistance → min R:R floor. Kelly sizing throttled by HV rank. Pure math." },
               { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF data → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
             ].map(({ icon: Icon, label, color, desc }, i, arr) => (
               <div key={label} className="flex gap-3">

@@ -35,7 +35,8 @@ async def trigger_analysis(
         top_n = request.top_n
         watchlist = _current_settings.watchlist or ""
         sector_top_n = _current_settings.sector_top_n
-        task = run_on_demand.delay(str(run.id), mode, top_n, watchlist, sector_top_n)
+        pinned_sectors = ",".join(_current_settings.pinned_sectors) if _current_settings.pinned_sectors else ""
+        task = run_on_demand.delay(str(run.id), mode, top_n, watchlist, sector_top_n, pinned_sectors)
         run.mode = mode  # update the run record to reflect actual mode used
         run.celery_task_id = task.id
         run.status = RunStatus.RUNNING

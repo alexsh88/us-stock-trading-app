@@ -8,6 +8,7 @@ class AppSettings(BaseModel):
     paper_trading: bool = True
     watchlist: Optional[str] = Field(default=None, description="Comma-separated tickers to analyse instead of screener")
     sector_top_n: int = Field(default=3, ge=1, le=14, description="Number of leading sector ETFs to build the universe from")
+    pinned_sectors: list[str] = Field(default_factory=list, description="Specific sector ETFs to pin (e.g. ['XLK','XLE']). Empty = auto ETF ranking.")
 
 
 class AppSettingsResponse(AppSettings):

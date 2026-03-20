@@ -19,22 +19,23 @@ def _get_sync_session():
     return Session(), engine
 
 
-def run_morning_analysis(mode: str = "swing", top_n: int = 5, watchlist: str = "", sector_top_n: int = 3) -> dict:
+def run_morning_analysis(mode: str = "swing", top_n: int = 5, watchlist: str = "", sector_top_n: int = 3, pinned_sectors: str = "") -> dict:
     """Celery task: triggered by Beat at 9:00 AM ET."""
-    return _run_sync(str(uuid.uuid4()), mode, top_n, watchlist, sector_top_n)
+    return _run_sync(str(uuid.uuid4()), mode, top_n, watchlist, sector_top_n, pinned_sectors)
 
 
-def run_on_demand(run_id: str, mode: str = "swing", top_n: int = 5, watchlist: str = "", sector_top_n: int = 3) -> dict:
+def run_on_demand(run_id: str, mode: str = "swing", top_n: int = 5, watchlist: str = "", sector_top_n: int = 3, pinned_sectors: str = "") -> dict:
     """Celery task: triggered by API endpoint."""
-    return _run_sync(run_id, mode, top_n, watchlist, sector_top_n)
+    return _run_sync(run_id, mode, top_n, watchlist, sector_top_n, pinned_sectors)
 
 
-def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_top_n: int = 3) -> dict:
+def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_top_n: int = 3, pinned_sectors: str = "") -> dict:
     from app.models.analysis import AnalysisRun, RunStatus
     from app.models.signals import TradeSignal, TradeDecision, TradingMode
     from app.agents.graph import trading_graph
 
-    logger.info("Starting analysis run", run_id=run_id, mode=mode, top_n=top_n, sector_top_n=sector_top_n)
+    pinned_list = [s.strip().upper() for s in pinned_sectors.split(",") if s.strip()] if pinned_sectors else []
+    logger.info("Starting analysis run", run_id=run_id, mode=mode, top_n=top_n, sector_top_n=sector_top_n, pinned_sectors=pinned_list)
 
     session, engine = _get_sync_session()
     try:
@@ -55,6 +56,7 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_to
                 "mode": mode,
                 "top_n": top_n,
                 "sector_top_n": sector_top_n,
+                "pinned_sectors": pinned_list,
                 "watchlist_active": bool(custom_tickers),
                 "run_id": run_id,
                 "candidate_tickers": custom_tickers,  # pre-populated = screener skipped
