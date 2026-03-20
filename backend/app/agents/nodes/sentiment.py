@@ -5,9 +5,41 @@ from typing import Any
 
 logger = structlog.get_logger()
 
+
+def _fetch_stocktwits(ticker: str) -> dict:
+    """Fetch StockTwits message stream and compute bullish/bearish ratio.
+    No API key required. Rate limit ~200 calls/hr (enforced by caller spacing).
+    Returns empty dict on any failure so callers can treat it as optional.
+    """
+    try:
+        resp = httpx.get(
+            f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json",
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return {}
+        messages = resp.json().get("messages", [])
+        if not messages:
+            return {}
+        total = len(messages)
+        bullish = sum(
+            1 for m in messages
+            if m.get("entities", {}).get("sentiment", {}).get("basic") == "Bullish"
+        )
+        bearish = sum(
+            1 for m in messages
+            if m.get("entities", {}).get("sentiment", {}).get("basic") == "Bearish"
+        )
+        bullish_pct = round(bullish / total, 3) if total > 0 else 0.5
+        return {"bullish_pct": bullish_pct, "message_count": total, "bullish": bullish, "bearish": bearish}
+    except Exception:
+        return {}
+
+
 SENTIMENT_SYSTEM = """You are a market sentiment analyst. Score each stock 0.0-1.0 for bullish sentiment.
 Analyze the provided news headlines carefully — distinguish between genuine bullish catalysts (guidance raises, partnerships, earnings beats) and bearish events (lawsuits, guidance cuts, CEO departure).
 Reddit mentions and institutional news sentiment give context but headlines tell you the specific story.
+StockTwits: bullish_pct>0.65 with high message count = strong retail conviction; <0.35 = retail bearish. Weight at 30% of social signal.
 Respond with one line per stock: TICKER|SCORE|REASONING (max 100 chars reasoning).
 
 Examples (use the full 0.0-1.0 range):
@@ -15,7 +47,8 @@ NVDA|0.85|Headlines: raised guidance +40%, new data center deals; Reddit very bu
 KSS|0.21|Headlines: CEO resigned, store closures announced, guidance cut; Reddit bearish
 META|0.71|Headlines: new AI product launch, positive analyst upgrades; neutral Reddit
 GME|0.38|Headlines: no new catalysts, meme noise only; retail buzz without fundamental basis
-LLY|0.80|Headlines: FDA approval for new indication, strong earnings beat; institutional buying"""
+LLY|0.80|Headlines: FDA approval for new indication, strong earnings beat; institutional buying
+AAPL|0.68|Positive headlines, StockTwits 71% bullish (450 msgs) = strong retail conviction"""
 
 
 def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -43,6 +76,13 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
                         }
         except Exception as e:
             logger.warning("ApeWisdom fetch failed", error=str(e))
+
+        # Fetch StockTwits sentiment (no API key, ~200/hr limit)
+        stocktwits_data: dict[str, dict] = {}
+        for ticker in tickers:
+            st = _fetch_stocktwits(ticker)
+            if st:
+                stocktwits_data[ticker] = st
 
         # Fetch IBKR news headlines (free providers: Briefing.com + Dow Jones)
         ibkr_headlines: dict[str, list[str]] = {}
@@ -124,9 +164,15 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
                             seen.add(key)
                             merged.append(h)
                     headline_str = " | ".join(merged[:4]) if merged else "no recent news"
+                    st = stocktwits_data.get(ticker, {})
+                    st_str = (
+                        f"{st['bullish_pct']:.0%}bullish({st['message_count']}msgs)"
+                        if st else "n/a"
+                    )
                     lines.append(
                         f"{ticker}: News_sentiment={ns:+.2f}, Headlines: {headline_str} | "
-                        f"Reddit_mentions={rd.get('mentions', 0)}, Reddit_sentiment={rd.get('sentiment', 0.0):+.2f}"
+                        f"Reddit_mentions={rd.get('mentions', 0)}, Reddit_sentiment={rd.get('sentiment', 0.0):+.2f} | "
+                        f"StockTwits={st_str}"
                     )
 
                 from app.agents.llm_utils import call_llm_batched
@@ -175,10 +221,13 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
                 scores[ticker] = {"score": 0.5, "reasoning": "no data"}
             rd = reddit_data.get(ticker, {})
             nd = news_data.get(ticker, {})
+            st = stocktwits_data.get(ticker, {})
             scores[ticker].update({
                 "news_sentiment": round(nd.get("sentiment_delta", 0.0), 4),
                 "reddit_mentions": rd.get("mentions", 0),
                 "reddit_sentiment": round(rd.get("sentiment", 0.0), 4),
+                "stocktwits_bullish_pct": st.get("bullish_pct"),
+                "stocktwits_messages": st.get("message_count"),
             })
             # Collect merged headlines for news_embeddings storage
             finnhub_h = nd.get("headlines", [])

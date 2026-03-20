@@ -14,6 +14,7 @@ Note: Only insider PURCHASES (not options exercises) are bullish. Director selli
 NegativeEvent8K=YES means an auditor change (item 4.01) or goodwill impairment (item 2.06) was filed — score < 0.25.
 Activist13D=YES means a >5% activist stake was disclosed — strongly bullish (price target pressure, strategic review).
 PutCallRatio: >1.5 = bearish options sentiment (reduce score); <0.7 = bullish options positioning (add to score).
+ShortFloat: >0.20 = high short interest (squeeze potential if price rising, boost score +0.10); <0.05 = no squeeze catalyst.
 Respond with one line per stock: TICKER|SCORE|REASONING (max 100 chars reasoning).
 
 Examples (use the full 0.0-1.0 range):
@@ -22,7 +23,8 @@ KSS|0.18|0 positive 8-K, CFO sold $500K shares, negative news cycle; no upcoming
 META|0.65|1 8-K (product announcement), no insider activity, upcoming earnings = binary risk
 AAPL|0.55|No recent 8-K filings, routine Form 4 exercises only, quiet catalyst environment
 SMCI|0.22|NegativeEvent8K=auditor dismissed; accounting risk overrides all other signals
-DLTR|0.78|Activist13D filed (Starboard Value), high bullish options positioning (PC=0.55)"""
+DLTR|0.78|Activist13D filed (Starboard Value), high bullish options positioning (PC=0.55)
+GME|0.72|ShortFloat=22%, strong RS, rising price = active short squeeze in progress"""
 
 # SEC EDGAR requires a descriptive User-Agent with contact info
 _EDGAR_UA = "TradingAnalysisApp contact@tradingapp.example.com"
@@ -129,9 +131,12 @@ def catalyst_node(state: dict[str, Any]) -> dict[str, Any]:
             earnings_days = None
             news_count = 0
 
+            # Reuse single Ticker object for calendar + short interest + options
+            t_obj = yf.Ticker(ticker)
+
             # Upcoming earnings
             try:
-                cal = yf.Ticker(ticker).calendar
+                cal = t_obj.calendar
                 if cal is not None and "Earnings Date" in cal:
                     ed = cal["Earnings Date"]
                     if hasattr(ed, "__iter__"):
@@ -143,6 +148,16 @@ def catalyst_node(state: dict[str, Any]) -> dict[str, Any]:
                             if 0 <= days <= 30:
                                 has_earnings = True
                                 earnings_days = days
+            except Exception:
+                pass
+
+            # Short interest as % of float (squeeze potential signal)
+            short_float = None
+            try:
+                info = t_obj.info
+                sp = info.get("shortPercentOfFloat")
+                if sp is not None:
+                    short_float = round(float(sp), 4)
             except Exception:
                 pass
 
@@ -165,7 +180,6 @@ def catalyst_node(state: dict[str, Any]) -> dict[str, Any]:
             # Put/Call ratio from nearest-expiry options chain
             put_call_ratio = None
             try:
-                t_obj = yf.Ticker(ticker)
                 expiries = t_obj.options
                 if expiries:
                     chain = t_obj.option_chain(expiries[0])
@@ -185,6 +199,7 @@ def catalyst_node(state: dict[str, Any]) -> dict[str, Any]:
                 "activist_13d": edgar["activist_13d"],
                 "negative_8k": edgar.get("negative_8k", False),
                 "put_call_ratio": put_call_ratio,
+                "short_float": short_float,
             }
 
         # --- Redis cache: split tickers into cached vs uncached ---
@@ -216,11 +231,13 @@ def catalyst_node(state: dict[str, Any]) -> dict[str, Any]:
                     pc_str = f"{d['put_call_ratio']:.2f}" if d["put_call_ratio"] is not None else "n/a"
                     activist_str = f"YES({d['activist_13d']})" if d["activist_13d"] else "no"
                     neg8k_str = "YES(auditor/impairment)" if d.get("negative_8k") else "no"
+                    sf = d.get("short_float")
+                    short_str = f"{sf:.1%}" if sf is not None else "n/a"
                     lines.append(
                         f"{ticker}: Earnings={earnings_str}, News_7d={d['news_count']}, "
                         f"SEC_8K={d['edgar_8k_count']}, NegativeEvent8K={neg8k_str}, "
                         f"InsiderActivity={d['edgar_form4_count']}, "
-                        f"Activist13D={activist_str}, PutCallRatio={pc_str}"
+                        f"Activist13D={activist_str}, PutCallRatio={pc_str}, ShortFloat={short_str}"
                     )
 
                 from app.agents.llm_utils import call_llm_batched
@@ -276,6 +293,7 @@ def catalyst_node(state: dict[str, Any]) -> dict[str, Any]:
                 "edgar_form4_count": d["edgar_form4_count"],
                 "activist_13d": d["activist_13d"],
                 "put_call_ratio": d["put_call_ratio"],
+                "short_float": d.get("short_float"),
                 "sec_filings": [],
             })
 
