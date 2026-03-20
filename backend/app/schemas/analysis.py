@@ -62,6 +62,7 @@ class TradeSignalResponse(BaseModel):
     stop_loss_price: Optional[float] = None
     stop_loss_method: Optional[str] = None
     take_profit_price: Optional[float] = None
+    take_profit_price_2: Optional[float] = None
     risk_reward_ratio: Optional[float] = None
     position_size_pct: Optional[float] = None
     agent_scores: AgentScores = AgentScores()
@@ -90,6 +91,7 @@ class TradeSignalResponse(BaseModel):
             stop_loss_price=s.stop_loss_price,
             stop_loss_method=s.stop_loss_method,
             take_profit_price=s.take_profit_price,
+            take_profit_price_2=s.take_profit_price_2,
             risk_reward_ratio=s.risk_reward_ratio,
             position_size_pct=s.position_size_pct,
             agent_scores=AgentScores(

@@ -50,6 +50,7 @@ export interface TradeSignal {
   stop_loss_price?: number | null;
   stop_loss_method?: string | null;
   take_profit_price?: number | null;
+  take_profit_price_2?: number | null;
   risk_reward_ratio?: number | null;
   position_size_pct?: number | null;
   agent_scores: AgentScores;

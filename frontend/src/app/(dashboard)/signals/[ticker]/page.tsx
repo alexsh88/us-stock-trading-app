@@ -354,14 +354,31 @@ export default function SignalDetailPage() {
           borderClass="border border-red-500/20"
         />
         <LevelCard
-          label="Take Profit"
+          label="Target 1 (T1)"
           price={`$${signal.take_profit_price?.toFixed(2)}`}
-          subLabel={`R:R ${signal.risk_reward_ratio?.toFixed(1)}×`}
+          subLabel={`R:R ${signal.risk_reward_ratio?.toFixed(1)}× · close 50%`}
           reason={formatTargetReason(signal.indicators?.target_method, signal.risk_reward_ratio)}
           colorClass="text-green-400"
           borderClass="border border-green-500/20"
         />
       </div>
+
+      {/* T2 — second target for trailing remainder */}
+      {signal.take_profit_price_2 && (
+        <div className="bg-card border border-green-500/10 rounded-lg p-4 flex items-center justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-0.5">Target 2 (T2) — trail 25%</p>
+            <p className="text-lg font-bold text-green-300">${signal.take_profit_price_2.toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              +{signal.entry_price ? ((signal.take_profit_price_2 - signal.entry_price) / signal.entry_price * 100).toFixed(1) : "?"}% from entry · next resistance above T1
+            </p>
+          </div>
+          <div className="text-xs text-muted-foreground text-right max-w-[55%]">
+            After T1 is hit, 50% position remains with stop moved to breakeven.
+            T2 exits another 25% — the final 25% trails with chandelier (+ PSAR when ADX &gt; 25).
+          </div>
+        </div>
+      )}
 
       {/* Agent scores */}
       <div className="bg-card border border-border rounded-lg p-4">

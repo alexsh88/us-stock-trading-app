@@ -560,12 +560,18 @@ export default function GuidePage() {
                   },
                   {
                     n: "3",
+                    label: "Anchored VWAP (AVWAP)",
+                    color: "bg-purple-500/20 text-purple-400",
+                    desc: "VWAP anchored to the most recent swing low. When price is within 3% above AVWAP, it is a meaningful structural support level. Stop placed 0.2% below AVWAP. Skipped when price is too far above to be a nearby stop.",
+                  },
+                  {
+                    n: "4",
                     label: "Chandelier Exit",
                     color: "bg-yellow-500/20 text-yellow-400",
                     desc: "Swing mode: highest close of the last 10 bars minus 2.5× ATR(10). This level ratchets upward as price climbs — a trailing stop that stays tight during trending moves.",
                   },
                   {
-                    n: "4",
+                    n: "5",
                     label: "ATR-based stop",
                     color: "bg-secondary text-muted-foreground",
                     desc: "Fallback. Swing mode: 2× Wilder's ATR(14) below entry. Intraday mode: 1.5× ATR. Uses Wilder's smoothed ATR (EMA-based) which expands in volatile periods and tightens in calm ones.",
@@ -663,7 +669,7 @@ export default function GuidePage() {
           Three additional stop and target levels are computed from daily OHLCV data (no extra API calls):
           <ul className="mt-2 space-y-1 text-xs text-muted-foreground list-disc pl-4">
             <li><strong>Anchored VWAP (AVWAP)</strong> — VWAP from the most recent swing low. When price is within
-              3% above AVWAP, it is a meaningful structural support; stop is placed 0.2% below AVWAP. Priority 1.7
+              3% above AVWAP, it is a meaningful structural support; stop is placed 0.2% below AVWAP. Priority 3
               in the stop waterfall (between Fib retracement and Chandelier Exit).</li>
             <li><strong>Volume Profile (VPOC / VAL / VAH)</strong> — 20 price buckets over the last 60 bars.
               VPOC is the most traded price level. VAH (Value Area High) is used as a target when it offers
@@ -671,6 +677,22 @@ export default function GuidePage() {
             <li><strong>Weekly structural stop</strong> — the nearest weekly swing low below current price.
               Stronger than a daily swing low; appears in the signal&apos;s indicator panel for context.</li>
           </ul>
+        </Callout>
+
+        <Callout icon={Target} color="green" title="Scale-out exit strategy — 3 tranches">
+          Each signal has two targets (T1 and T2) and uses a staged exit rather than a single close:
+          <ul className="mt-2 space-y-1 text-xs text-muted-foreground list-disc pl-4">
+            <li><strong>T1 hit (50% exit)</strong> — half the position is closed at the first target.
+              The stop on the remaining 50% moves to breakeven — the trade cannot be a loser from this point.</li>
+            <li><strong>T2 hit (25% exit)</strong> — another quarter is closed at the second target (next
+              resistance level above T1). The final 25% enters trailing mode.</li>
+            <li><strong>Trailing remainder (25%)</strong> — the chandelier stop ratchets up nightly.
+              When the position is profitable <em>and</em> ADX &gt; 25 (confirmed trend),
+              the <strong>Parabolic SAR</strong> activates as a tighter trailing stop.
+              The trailing 25% rides until the stop is hit — capturing extended runs without giving back profits.</li>
+          </ul>
+          T1 and T2 are visible on the signal detail page. T2 is the nearest viable resistance level above T1
+          from the same pool: Fib extensions, weekly pivots, VAH, clustered resistance.
         </Callout>
       </Section>
 
@@ -940,7 +962,7 @@ export default function GuidePage() {
               { icon: BarChart2,   label: "Fundamental Agent",  color: "text-violet-400", desc: "P/E, revenue growth, FCF yield, margins via yfinance → Haiku scores 0–1. Cached 24h." },
               { icon: TrendingUp,  label: "Sentiment Agent",    color: "text-pink-400",   desc: "Finnhub headlines + ApeWisdom Reddit mentions + StockTwits bullish/bearish ratio → Haiku scores 0–1. Cached 30min." },
               { icon: Zap,         label: "Catalyst Agent",     color: "text-orange-400", desc: "SEC EDGAR 8-K/Form 4/SC 13D filings + earnings dates + Put/Call ratio + short interest % of float (squeeze potential) → Haiku scores 0–1. Cached 4h." },
-              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop waterfall: pattern (≥0.65) → Fib retracement → AVWAP → Chandelier Exit → ATR. Target waterfall: pattern → Fib 1.272×/1.618× → Weekly R1/R2 → Volume Profile VAH → clustered resistance → min R:R floor. Kelly sizing throttled by beta (high-beta = smaller size), HV rank, and regime multiplier. Pure math." },
+              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop waterfall: pattern (≥0.65) → Fib retracement → AVWAP → Chandelier Exit → ATR. Dual targets: T1 (first resistance) + T2 (next level above T1). Exit strategy: 50% at T1 (stop→breakeven), 25% at T2, 25% trails chandelier/PSAR. Kelly sizing throttled by beta, HV rank, and regime multiplier." },
               { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF + gap type → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Sector concentration cap (max 2 per sector). Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
             ].map(({ icon: Icon, label, color, desc }, i, arr) => (
               <div key={label} className="flex gap-3">
