@@ -119,6 +119,7 @@ def _run_sync(run_id: str, mode: str, top_n: int, watchlist: str = "", sector_to
                     stop_loss_price=sig_data.get("stop_loss_price"),
                     stop_loss_method=sig_data.get("stop_loss_method"),
                     take_profit_price=sig_data.get("take_profit_price"),
+                    take_profit_price_2=sig_data.get("take_profit_price_2"),
                     risk_reward_ratio=sig_data.get("risk_reward_ratio"),
                     position_size_pct=sig_data.get("position_size_pct"),
                     technical_score=sig_data.get("technical_score"),

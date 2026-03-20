@@ -35,6 +35,7 @@ class TradeSignal(Base):
     stop_loss_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     stop_loss_method: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     take_profit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    take_profit_price_2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     risk_reward_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     position_size_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 

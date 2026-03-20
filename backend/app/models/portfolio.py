@@ -36,10 +36,14 @@ class Position(Base):
     quantity: Mapped[int] = mapped_column(Integer)
     entry_price: Mapped[float] = mapped_column(Float)
     stop_loss_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    stop_loss_method: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     take_profit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    target2_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    scale_out_stage: Mapped[int] = mapped_column(Integer, default=0)
+    partial_realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     current_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    close_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # stop_loss | take_profit | manual
+    close_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     status: Mapped[PositionStatus] = mapped_column(SAEnum(PositionStatus), default=PositionStatus.OPEN)
     is_paper: Mapped[bool] = mapped_column(Boolean, default=True)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -56,5 +60,6 @@ class Position(Base):
     @property
     def realized_pnl(self) -> Optional[float]:
         if self.exit_price and self.status == PositionStatus.CLOSED:
-            return (self.exit_price - self.entry_price) * self.quantity
+            last_tranche = (self.exit_price - self.entry_price) * self.quantity
+            return last_tranche + (self.partial_realized_pnl or 0)
         return None

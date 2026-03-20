@@ -260,6 +260,27 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                 if target_price == min_target_price and swing_resistance:
                     _try_target(swing_resistance, "SwingResist")
 
+                # ── Second target (T2) — next viable level above T1 ───────────
+                # Collect all candidate levels above T1, pick the nearest one.
+                t2_candidates = []
+                for _key in ["fib_ext_127", "fib_ext_162"]:
+                    _val = tech.get(_key) or 0
+                    if _val > target_price:
+                        t2_candidates.append(_val)
+                for _key in ["weekly_r1", "weekly_r2"]:
+                    _val = tech.get(_key) or 0
+                    if _val > target_price:
+                        t2_candidates.append(_val)
+                for _val_direct in [tech.get("vah") or 0, clustered_resistance or 0, swing_resistance or 0]:
+                    if _val_direct > target_price:
+                        t2_candidates.append(_val_direct)
+                take_profit_price_2: float | None = None
+                if t2_candidates:
+                    take_profit_price_2 = round(min(t2_candidates), 2)
+                elif target_price > current_price:
+                    # Fallback: extend T1 by the same distance again
+                    take_profit_price_2 = round(target_price + (target_price - current_price), 2)
+
                 # Apply regime multiplier to position size
                 regime_adjusted_pct = round(kelly_pct * regime_sizing, 2)
 
@@ -268,6 +289,7 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                     "stop_loss_price": stop_loss_price,
                     "stop_loss_pct": round(stop_loss_pct, 4),
                     "take_profit_price": target_price,
+                    "take_profit_price_2": take_profit_price_2,
                     "risk_reward_ratio": target_rr,
                     "position_size_pct": regime_adjusted_pct,
                     "stop_loss_method": stop_method,
