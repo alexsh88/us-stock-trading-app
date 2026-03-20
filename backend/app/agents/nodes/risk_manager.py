@@ -16,7 +16,8 @@ def calculate_atr(hist: pd.DataFrame, period: int = 14) -> float:
         close = hist["Close"].squeeze()
         prev_close = close.shift(1)
         tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
-        return float(tr.tail(period).mean())
+        # Wilder's smoothed ATR (EMA with alpha=1/period) — more responsive to vol expansion
+        return float(tr.ewm(alpha=1.0 / period, adjust=False).mean().iloc[-1])
     except Exception:
         return 0.0
 
@@ -92,19 +93,44 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                     continue
 
                 # ── Stop loss priority ────────────────────────────────────────────
-                # 1. Pattern-specific stop (if pattern detected with strength ≥ 0.65)
-                # 2. Chandelier Exit (swing mode)
-                # 3. ATR-based stop (fallback / intraday)
+                # 1.  Pattern-specific stop (strength ≥ 0.65)
+                # 1.5 Fibonacci retracement stop (price within 5% above 61.8/50/38.2%)
+                # 2.  Chandelier Exit (swing mode)
+                # 3.  ATR-based stop (fallback / intraday)
                 tech = state.get("technical_scores", {}).get(ticker, {})
                 pat_stop     = tech.get("pattern_stop")
                 pat_target   = tech.get("pattern_target")
                 pat_strength = tech.get("pattern_strength", 0.0)
                 pat_name     = tech.get("pattern_name")
 
+                # ── Stop priority waterfall ───────────────────────────────────────
+                # Each priority only fires if the previous one did not assign a stop.
+                stop_loss_price = None
+                stop_method = None
+
+                # 1. Pattern stop (strong pattern with defined invalidation level)
                 if pat_stop and pat_strength >= 0.65 and pat_stop < current_price:
                     stop_loss_price = round(pat_stop, 2)
-                    stop_method = f"Pattern-{pat_name}(str={pat_strength:.2f})"
-                elif mode == "swing":
+                    stop_method = f"{pat_name}-invalidation(str={pat_strength:.2f})"
+
+                # 1.5. Fibonacci retracement stop
+                # When price is within 5% above a Fib level, that level is a natural
+                # support zone — the stop belongs just below it (0.5% buffer).
+                if stop_loss_price is None:
+                    for fib_key, fib_label in [
+                        ("fib_ret_618", "Fib61.8"),
+                        ("fib_ret_500", "Fib50.0"),
+                        ("fib_ret_382", "Fib38.2"),
+                    ]:
+                        level = tech.get(fib_key)
+                        if level and 0 < level < current_price:
+                            if (current_price - level) / current_price * 100 <= 5.0:
+                                stop_loss_price = round(level * 0.995, 2)
+                                stop_method = f"{fib_label}(${level:.2f})"
+                                break
+
+                # 2. Chandelier Exit (swing mode — ratchets up with price)
+                if stop_loss_price is None and mode == "swing":
                     chandelier = calculate_chandelier_stop(hist, period=10, multiplier=2.5)
                     atr_stop = round(current_price - atr * atr_multiplier, 2)
                     if chandelier and chandelier > atr_stop:
@@ -113,7 +139,9 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                     else:
                         stop_loss_price = atr_stop
                         stop_method = f"ATR-{atr_multiplier}x (ATR={atr:.3f})"
-                else:
+
+                # 3. ATR stop (intraday fallback)
+                if stop_loss_price is None:
                     stop_loss_price = round(current_price - atr * atr_multiplier, 2)
                     stop_method = f"ATR-{atr_multiplier}x (ATR={atr:.3f})"
 
@@ -131,26 +159,59 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                 avg_win = stop_distance * min_rr
                 kelly_pct = kelly_position_size(0.50, avg_win, stop_distance)
 
-                swing_resistance = tech.get("swing_resistance")
+                # ── HV percentile position size throttle ─────────────────────────
+                # High-volatility regimes require smaller position sizes.
+                # hv_rank=0 means quietest 10th percentile; 100=most volatile.
+                hv_rank = tech.get("hv_rank")
+                if hv_rank is not None:
+                    if hv_rank >= 80:
+                        kelly_pct *= 0.50   # extreme vol: half size
+                    elif hv_rank >= 40:
+                        kelly_pct *= 0.75   # elevated vol: 3/4 size
 
-                # ── Target priority ───────────────────────────────────────────────
-                # 1. Pattern-specific target (if strong pattern and it gives ≥ min R:R)
-                # 2. Swing resistance (if it gives ≥ min R:R)
-                # 3. Minimum R:R target
+                swing_resistance = tech.get("swing_resistance")
+                clustered_resistance = tech.get("clustered_resistance")
+
+                # ── Target priority waterfall ─────────────────────────────────────
+                # Each level only fires if the previous one did not set a target.
                 target_price = min_target_price
                 target_rr = min_rr
+                target_method = "min_rr_floor"
 
-                if pat_target and pat_strength >= 0.65 and pat_target > current_price:
-                    pat_rr = (pat_target - current_price) / stop_distance
-                    if pat_rr >= min_rr:
-                        target_price = round(pat_target, 2)
-                        target_rr = round(pat_rr, 2)
+                def _try_target(price: float, label: str) -> bool:
+                    nonlocal target_price, target_rr, target_method
+                    if price > current_price:
+                        rr = (price - current_price) / stop_distance
+                        if rr >= min_rr:
+                            target_price = round(price, 2)
+                            target_rr = round(rr, 2)
+                            target_method = label
+                            return True
+                    return False
 
-                if target_price == min_target_price and swing_resistance and swing_resistance > current_price:
-                    resist_rr = (swing_resistance - current_price) / stop_distance
-                    if resist_rr >= min_rr:
-                        target_price = round(swing_resistance, 2)
-                        target_rr = round(resist_rr, 2)
+                # 1. Pattern measured-move target
+                if pat_target and pat_strength >= 0.65:
+                    _try_target(pat_target, f"pattern-{pat_name}")
+
+                # 2. Fibonacci 1.272x extension (nearest viable extension above current price)
+                if target_price == min_target_price:
+                    for fib_key, fib_label in [("fib_ext_127", "Fib127"), ("fib_ext_162", "Fib162")]:
+                        if _try_target(tech.get(fib_key) or 0, fib_label):
+                            break
+
+                # 3. Weekly pivot R1 then R2
+                if target_price == min_target_price:
+                    for piv_key, piv_label in [("weekly_r1", "WeeklyR1"), ("weekly_r2", "WeeklyR2")]:
+                        if _try_target(tech.get(piv_key) or 0, piv_label):
+                            break
+
+                # 4. Clustered swing resistance (most-touched S/R level)
+                if target_price == min_target_price and clustered_resistance:
+                    _try_target(clustered_resistance, "ClusteredResist")
+
+                # 5. Most-recent swing resistance (original fallback)
+                if target_price == min_target_price and swing_resistance:
+                    _try_target(swing_resistance, "SwingResist")
 
                 # Apply regime multiplier to position size
                 regime_adjusted_pct = round(kelly_pct * regime_sizing, 2)
@@ -163,8 +224,10 @@ def risk_manager_node(state: dict[str, Any]) -> dict[str, Any]:
                     "risk_reward_ratio": target_rr,
                     "position_size_pct": regime_adjusted_pct,
                     "stop_loss_method": stop_method,
+                    "target_method": target_method,
                     "min_rr": min_rr,
                     "regime_sizing": regime_sizing,
+                    "hv_rank": hv_rank,
                     "pattern_name": pat_name,
                     "pattern_strength": pat_strength,
                 }

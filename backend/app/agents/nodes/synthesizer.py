@@ -85,11 +85,26 @@ def _build_ticker_block(ticker: str, state: dict[str, Any], current_price: float
     resist = tech.get("swing_resistance")
     support = tech.get("swing_support")
 
-    stop_str   = f"${stop:.2f}"   if stop   else "calc"
-    target_str = f"${target:.2f}" if target else "calc"
-    rr_str     = f"{rr:.1f}x"    if rr     else "?"
-    resist_str = f"${resist:.2f}" if resist else "none"
+    stop_str    = f"${stop:.2f}"    if stop    else "calc"
+    target_str  = f"${target:.2f}" if target  else "calc"
+    rr_str      = f"{rr:.1f}x"    if rr      else "?"
+    resist_str  = f"${resist:.2f}" if resist  else "none"
     support_str = f"${support:.2f}" if support else "none"
+
+    # Extended targets: Fibonacci extensions and weekly pivots
+    fib127    = tech.get("fib_ext_127")
+    fib162    = tech.get("fib_ext_162")
+    weekly_r1 = tech.get("weekly_r1")
+    weekly_r2 = tech.get("weekly_r2")
+    hv_rank   = tech.get("hv_rank")
+    target_method = risk.get("target_method", "")
+    ext_parts = []
+    if fib127:   ext_parts.append(f"Fib127=${fib127:.2f}")
+    if fib162:   ext_parts.append(f"Fib162=${fib162:.2f}")
+    if weekly_r1: ext_parts.append(f"WklyR1=${weekly_r1:.2f}")
+    if weekly_r2: ext_parts.append(f"WklyR2=${weekly_r2:.2f}")
+    ext_str = " | ".join(ext_parts) if ext_parts else "none"
+    hv_str  = f"{hv_rank:.0f}th-pct" if hv_rank is not None else "n/a"
 
     # Pattern line
     pat_name     = tech.get("pattern_name")
@@ -110,8 +125,8 @@ def _build_ticker_block(ticker: str, state: dict[str, Any], current_price: float
         f"Fundamental: {fund.get('score', 0.5):.2f} | {fund.get('reasoning', 'N/A')[:120]}\n"
         f"Sentiment: {sent.get('score', 0.5):.2f} | {sent.get('reasoning', 'N/A')[:80]}\n"
         f"Catalyst: {cat.get('score', 0.5):.2f} | {cat.get('reasoning', 'N/A')[:80]}\n"
-        f"Risk: Stop={stop_str} | MinTarget={target_str} (R:R={rr_str}) | Size={risk.get('position_size_pct', 2.0):.1f}% | {risk.get('stop_loss_method', 'ATR-2x')}\n"
-        f"Levels: Resistance={resist_str} | Support={support_str} | Min R:R required={min_rr:.1f}x"
+        f"Risk: Stop={stop_str}({risk.get('stop_loss_method','ATR-2x')}) | Target={target_str}({target_method}) R:R={rr_str} | Size={risk.get('position_size_pct', 2.0):.1f}% | HV={hv_str}\n"
+        f"Levels: Resist={resist_str} | Support={support_str} | ExtTargets={ext_str} | Min R:R={min_rr:.1f}x"
         f"{pattern_line}"
         f"{hist_context}"
     )

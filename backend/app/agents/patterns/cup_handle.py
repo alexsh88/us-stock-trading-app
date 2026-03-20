@@ -176,7 +176,17 @@ def detect_cup_handle(
             continue
 
         cup_depth = left_lip_price - cup_bottom_price
-        stop   = round(pivot * 0.925, 2)   # O'Neil: 7.5% below pivot
+        # O'Neil: 7.5% below pivot — but cap at ATR-2x so high-priced low-volatility
+        # stocks don't get a $40 stop when their daily range is only $3.
+        try:
+            prev_c = close.shift(1)
+            tr_s = pd.concat([high - low, (high - prev_c).abs(), (low - prev_c).abs()], axis=1).max(axis=1)
+            atr14 = float(tr_s.ewm(alpha=1 / 14, adjust=False).mean().iloc[-1])
+            atr_stop = round(current_price - atr14 * 2.0, 2)
+        except Exception:
+            atr_stop = None
+        oneil_stop = round(pivot * 0.925, 2)
+        stop = max(oneil_stop, atr_stop) if atr_stop else oneil_stop  # tighter of the two
         target = round(pivot + cup_depth, 2)
 
         return PatternResult(

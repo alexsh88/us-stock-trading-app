@@ -85,10 +85,30 @@ def _calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 1
     return adx_val, regime
 
 
+def _cluster_best_level(levels: list[float], tolerance_pct: float = 1.5) -> float | None:
+    """Group nearby price levels and return the midpoint of the most-touched cluster.
+    Clusters within tolerance_pct% of each other are merged; the cluster with the
+    most touches is the strongest S/R zone.
+    """
+    if not levels:
+        return None
+    sorted_l = sorted(levels)
+    clusters: list[list[float]] = [[sorted_l[0]]]
+    for price in sorted_l[1:]:
+        ref = clusters[-1][0]
+        if ref > 0 and (price - ref) / ref * 100 <= tolerance_pct:
+            clusters[-1].append(price)
+        else:
+            clusters.append([price])
+    # Most touches wins; ties broken by highest price (most recent for resistance)
+    best = max(clusters, key=lambda c: (len(c), max(c)))
+    return round(sum(best) / len(best), 4)
+
+
 def _find_swing_levels(high: pd.Series, low: pd.Series, n: int = 5) -> dict:
     """Detect swing highs/lows using n-bar pivot logic.
     A swing high: candle whose high is greater than the n candles on each side.
-    Returns the last 3 swing highs and lows as price level lists.
+    Returns recent pivot levels plus clustered S/R for more robust targeting.
     """
     highs = high.values
     lows = low.values
@@ -104,11 +124,93 @@ def _find_swing_levels(high: pd.Series, low: pd.Series, n: int = 5) -> dict:
             swing_lows.append(round(float(lows[i]), 4))
 
     return {
-        "swing_highs": swing_highs[-3:],   # last 3 swing highs (resistance)
-        "swing_lows": swing_lows[-3:],     # last 3 swing lows (support)
-        "swing_resistance": swing_highs[-1] if swing_highs else None,
+        "swing_highs": swing_highs[-3:],
+        "swing_lows": swing_lows[-3:],
+        "swing_resistance": swing_highs[-1] if swing_highs else None,   # most recent pivot
         "swing_support": swing_lows[-1] if swing_lows else None,
+        "clustered_resistance": _cluster_best_level(swing_highs),       # most-touched cluster
+        "clustered_support": _cluster_best_level(swing_lows),
     }
+
+
+def _calc_fib_levels(close: pd.Series, high: pd.Series, low: pd.Series) -> dict:
+    """Compute Fibonacci extension targets and retracement stop levels.
+    Uses the most significant recent leg: lowest low in last 60 bars (swing_low),
+    then highest high after that low (swing_high).
+    Extensions: above swing_high (targets).
+    Retracements: from swing_high down toward swing_low (stop zones).
+    """
+    lookback = min(60, len(close))
+    seg_low = low.iloc[-lookback:]
+    seg_high = high.iloc[-lookback:]
+
+    swing_low_idx = int(seg_low.values.argmin())
+    swing_low_price = float(seg_low.iloc[swing_low_idx])
+
+    if swing_low_idx >= lookback - 2:
+        return {}  # no room for a subsequent leg
+
+    post_low_high = seg_high.iloc[swing_low_idx:]
+    swing_high_price = float(post_low_high.values.max())
+
+    if swing_high_price <= swing_low_price:
+        return {}
+    height = swing_high_price - swing_low_price
+    if height / swing_low_price < 0.03:   # less than 3% — noise
+        return {}
+
+    return {
+        "fib_ext_127": round(swing_high_price + height * 0.272, 2),
+        "fib_ext_162": round(swing_high_price + height * 0.618, 2),
+        "fib_ext_262": round(swing_high_price + height * 1.618, 2),
+        "fib_ret_382": round(swing_high_price - height * 0.382, 2),
+        "fib_ret_500": round(swing_high_price - height * 0.500, 2),
+        "fib_ret_618": round(swing_high_price - height * 0.618, 2),
+        "fib_swing_low": round(swing_low_price, 2),
+        "fib_swing_high": round(swing_high_price, 2),
+    }
+
+
+def _calc_hv_rank(close: pd.Series) -> float | None:
+    """Historical volatility percentile rank (0–100).
+    Uses 21-bar rolling HV (annualised) ranked against a 252-bar window.
+    80+ = high vol regime → reduce position size.
+    """
+    import numpy as np
+    if len(close) < 30:
+        return None
+    log_ret = np.log(close / close.shift(1)).dropna()
+    hv_series = log_ret.rolling(21).std() * np.sqrt(252)
+    hv_clean = hv_series.dropna().values
+    if len(hv_clean) < 10:
+        return None
+    current_hv = float(hv_clean[-1])
+    rank = float(np.sum(hv_clean <= current_hv)) / len(hv_clean) * 100
+    return round(rank, 1)
+
+
+def _calc_weekly_pivots(weekly_hist: pd.DataFrame) -> dict:
+    """Floor-trader pivot points from the prior week's OHLCV.
+    PP = (H+L+C)/3; R1 = 2×PP−L; R2 = PP+(H−L); S1 = 2×PP−H; S2 = PP−(H−L).
+    Widely self-fulfilling at institutional level — natural targets and stops.
+    """
+    try:
+        if weekly_hist is None or len(weekly_hist) < 2:
+            return {}
+        prev = weekly_hist.iloc[-2]
+        h = float(prev["High"])
+        l = float(prev["Low"])
+        c = float(prev["Close"])
+        pp = (h + l + c) / 3
+        return {
+            "weekly_pp": round(pp, 2),
+            "weekly_r1": round(2 * pp - l, 2),
+            "weekly_r2": round(pp + (h - l), 2),
+            "weekly_s1": round(2 * pp - h, 2),
+            "weekly_s2": round(pp - (h - l), 2),
+        }
+    except Exception:
+        return {}
 
 
 def _calc_bb_squeeze(close: pd.Series, high: pd.Series, low: pd.Series) -> dict:
@@ -248,6 +350,12 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
     # Consecutive up/down day streak (Connors RSI component)
     streak = _calc_streak(close)
 
+    # Fibonacci extension targets and retracement stop levels
+    fib = _calc_fib_levels(close, high, low)
+
+    # Historical volatility percentile rank (position size throttle)
+    hv_rank = _calc_hv_rank(close)
+
     return {
         "price": current_price,
         "rsi": rsi,
@@ -264,9 +372,11 @@ def _calc_indicators(hist: pd.DataFrame) -> dict:
         "nr7": nr7,
         "ema150_pct": ema150_pct,
         "streak": streak,
+        "hv_rank": hv_rank,
         **swing,
         **squeeze,
         **breakout,
+        **fib,
     }
 
 
@@ -437,6 +547,18 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
         mtf_map = _get_weekly_mtf(valid_tickers, all_weekly)
         for ticker in valid_tickers:
             indicators[ticker]["mtf_aligned"] = mtf_map.get(ticker, False)
+
+        # Weekly pivot points (R1/R2 as targets, S1 as stop proximity)
+        for ticker in valid_tickers:
+            try:
+                w_hist = (
+                    all_weekly[ticker]
+                    if not all_weekly.empty and ticker in all_weekly.columns.get_level_values(0)
+                    else pd.DataFrame()
+                )
+                indicators[ticker].update(_calc_weekly_pivots(w_hist))
+            except Exception:
+                pass
 
         # Short interest: fetch shortPercentOfFloat + shortRatio (days to cover) per ticker
         # Cached in Redis for 4h to avoid repeated yfinance info calls
@@ -694,6 +816,23 @@ def technical_node(state: dict[str, Any]) -> dict[str, Any]:
                 "pattern_target": ind.get("pattern_target"),
                 "pattern_details": ind.get("pattern_details"),
                 "_pattern_results": ind.get("_pattern_results", {}),
+                # Fibonacci levels
+                "fib_ext_127": ind.get("fib_ext_127"),
+                "fib_ext_162": ind.get("fib_ext_162"),
+                "fib_ext_262": ind.get("fib_ext_262"),
+                "fib_ret_382": ind.get("fib_ret_382"),
+                "fib_ret_500": ind.get("fib_ret_500"),
+                "fib_ret_618": ind.get("fib_ret_618"),
+                # Clustered S/R
+                "clustered_resistance": ind.get("clustered_resistance"),
+                "clustered_support": ind.get("clustered_support"),
+                # HV rank and weekly pivots
+                "hv_rank": ind.get("hv_rank"),
+                "weekly_pp": ind.get("weekly_pp"),
+                "weekly_r1": ind.get("weekly_r1"),
+                "weekly_r2": ind.get("weekly_r2"),
+                "weekly_s1": ind.get("weekly_s1"),
+                "weekly_s2": ind.get("weekly_s2"),
             })
 
         logger.info("Technical node complete", tickers_analyzed=len(scores))

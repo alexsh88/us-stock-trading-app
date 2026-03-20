@@ -129,6 +129,9 @@ def detect_vcp(
 
         pivot_price = round(pivot, 2)
         stop_price  = round(final_phase["low"] * 0.997, 2)
+        # Measured-move target: pivot + (pivot − final_phase_low)
+        # This is the natural "spring" distance projected upward from the breakout.
+        target_price = round(pivot_price + (pivot_price - final_phase["low"]), 2)
 
         return PatternResult(
             name="vcp",
@@ -136,7 +139,7 @@ def detect_vcp(
             strength=round(strength, 3),
             pivot=pivot_price,
             pattern_stop=stop_price,
-            pattern_target=None,  # no fixed target; use swing resistance
+            pattern_target=target_price,
             bars_forming=len(phases) * seg_len,
             details=(
                 f"{contraction_count + 1} contractions, final range {final_phase['range_pct']:.1f}%, "
