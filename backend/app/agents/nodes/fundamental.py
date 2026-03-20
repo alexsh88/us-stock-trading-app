@@ -73,21 +73,48 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 pass
 
-        # Collect fundamentals for all tickers
+        # Collect fundamentals — try IBKR first, fill gaps with yfinance
+        from app.services.ibkr_fundamentals_service import fetch_ibkr_fundamentals
+        ibkr_data = fetch_ibkr_fundamentals(tickers)
+        using_ibkr = bool(ibkr_data)
+        if using_ibkr:
+            logger.info("Fundamental node using IBKR data",
+                        tickers=len(ibkr_data), total=len(tickers))
+
         raw: dict[str, dict] = {}
         for ticker in tickers:
             try:
-                info = yf.Ticker(ticker).info or {}
-                pe = info.get("trailingPE")
-                fpe = info.get("forwardPE")
-                rev_growth = info.get("revenueGrowth")
-                margin = info.get("profitMargins")
-                de = info.get("debtToEquity")
-                cr = info.get("currentRatio")
-                fcf = info.get("freeCashflow")
-                mcap = info.get("marketCap")
-                fcf_yield = (fcf / mcap) if (fcf and mcap) else None
-                # epsForward change = earnings revision proxy from yfinance
+                ibkr = ibkr_data.get(ticker)
+
+                if ibkr is not None:
+                    # IBKR provided base metrics; fill fpe + fcf_yield from yfinance
+                    pe         = ibkr["pe"]
+                    rev_growth = ibkr["rev_growth"]
+                    margin     = ibkr["margin"]
+                    de         = ibkr["de"]
+                    cr         = ibkr["cr"]
+                    # fpe and fcf_yield not in ReportSnapshot — fetch from yfinance
+                    try:
+                        info = yf.Ticker(ticker).info or {}
+                        fpe  = info.get("forwardPE")
+                        fcf  = info.get("freeCashflow")
+                        mcap = ibkr["mcap"] or info.get("marketCap")
+                        fcf_yield = (fcf / mcap) if (fcf and mcap) else None
+                    except Exception:
+                        fpe, fcf_yield = None, None
+                else:
+                    # IBKR unavailable — full yfinance fallback
+                    info = yf.Ticker(ticker).info or {}
+                    pe         = info.get("trailingPE")
+                    fpe        = info.get("forwardPE")
+                    rev_growth = info.get("revenueGrowth")
+                    margin     = info.get("profitMargins")
+                    de         = info.get("debtToEquity")
+                    cr         = info.get("currentRatio")
+                    fcf        = info.get("freeCashflow")
+                    mcap       = info.get("marketCap")
+                    fcf_yield  = (fcf / mcap) if (fcf and mcap) else None
+
                 sue = sue_data.get(ticker, {})
                 raw[ticker] = {
                     "pe": pe, "fpe": fpe, "rev_growth": rev_growth,
