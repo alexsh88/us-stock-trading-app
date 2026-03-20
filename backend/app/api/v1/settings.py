@@ -1,13 +1,18 @@
+import json
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from redis.asyncio import Redis
+from app.core.redis_client import get_redis
 from app.config import get_settings
 from app.schemas.settings import AppSettings, AppSettingsResponse
 
 logger = structlog.get_logger()
 router = APIRouter()
 
-# Initialise from env defaults, then mutated in-memory on PATCH
-def _default_settings() -> AppSettings:
+REDIS_KEY = "app:settings"
+
+
+def _defaults() -> AppSettings:
     cfg = get_settings()
     return AppSettings(
         top_n=cfg.default_top_n,
@@ -15,16 +20,20 @@ def _default_settings() -> AppSettings:
         paper_trading=cfg.paper_trading,
     )
 
-_current_settings = _default_settings()
-
 
 @router.get("/", response_model=AppSettingsResponse)
-async def get_app_settings():
-    return _current_settings
+async def get_app_settings(redis: Redis = Depends(get_redis)):
+    raw = await redis.get(REDIS_KEY)
+    if raw:
+        try:
+            return AppSettings(**json.loads(raw))
+        except Exception:
+            pass
+    return _defaults()
 
 
 @router.patch("/", response_model=AppSettingsResponse)
-async def update_app_settings(settings: AppSettings):
-    global _current_settings
-    _current_settings = settings
-    return _current_settings
+async def update_app_settings(settings: AppSettings, redis: Redis = Depends(get_redis)):
+    await redis.set(REDIS_KEY, settings.model_dump_json())
+    logger.info("Settings saved", top_n=settings.top_n, mode=settings.trading_mode)
+    return settings

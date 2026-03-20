@@ -13,7 +13,11 @@ interface Position {
   entry_price: number;
   current_price?: number;
   stop_loss_price?: number;
+  stop_loss_method?: string;
   take_profit_price?: number;
+  target2_price?: number;
+  scale_out_stage: number;
+  partial_realized_pnl?: number;
   exit_price?: number;
   close_reason?: string;
   status: string;
@@ -48,23 +52,30 @@ function StatCard({ label, value, sub, color = "" }: {
   );
 }
 
+const CLOSE_REASON_CONFIG: Record<string, { label: string; icon: React.ElementType; style: string }> = {
+  take_profit:        { label: "T1 Hit",        icon: Target,      style: "bg-green-500/15 text-green-400 border-green-500/25" },
+  stop_loss:          { label: "SL Hit",         icon: ShieldAlert, style: "bg-red-500/15 text-red-400 border-red-500/25" },
+  stop_loss_after_t1: { label: "SL (after T1)", icon: ShieldAlert, style: "bg-orange-500/15 text-orange-400 border-orange-500/25" },
+  trailing_stop:      { label: "Trailing Stop", icon: TrendingDown, style: "bg-yellow-500/15 text-yellow-400 border-yellow-500/25" },
+  time_stop:          { label: "Time Stop",     icon: Clock,       style: "bg-secondary text-muted-foreground border-border" },
+  manual:             { label: "Manual",        icon: CheckCircle2, style: "bg-secondary text-muted-foreground border-border" },
+};
+
 function CloseReasonBadge({ reason }: { reason?: string }) {
-  if (!reason || reason === "manual") {
-    return <span className="text-xs bg-secondary text-muted-foreground px-1.5 py-0.5 rounded">Manual</span>;
-  }
-  if (reason === "take_profit") {
-    return (
-      <span className="text-xs bg-green-500/15 text-green-400 border border-green-500/25 px-1.5 py-0.5 rounded flex items-center gap-1 w-fit">
-        <Target className="h-3 w-3" /> TP Hit
-      </span>
-    );
-  }
+  const cfg = CLOSE_REASON_CONFIG[reason ?? "manual"] ?? CLOSE_REASON_CONFIG.manual;
+  const Icon = cfg.icon;
   return (
-    <span className="text-xs bg-red-500/15 text-red-400 border border-red-500/25 px-1.5 py-0.5 rounded flex items-center gap-1 w-fit">
-      <ShieldAlert className="h-3 w-3" /> SL Hit
+    <span className={`text-xs border px-1.5 py-0.5 rounded flex items-center gap-1 w-fit ${cfg.style}`}>
+      <Icon className="h-3 w-3" /> {cfg.label}
     </span>
   );
 }
+
+const STAGE_LABELS: Record<number, { label: string; color: string }> = {
+  0: { label: "Full position",   color: "text-muted-foreground" },
+  1: { label: "50% — at T2",     color: "text-yellow-400" },
+  2: { label: "25% — trailing",  color: "text-purple-400" },
+};
 
 function PnlBadge({ pnl }: { pnl: number }) {
   const positive = pnl >= 0;
@@ -254,8 +265,13 @@ export default function PortfolioPage() {
                     <div>
                       <span className="font-bold text-lg">{pos.ticker}</span>
                       <span className="text-muted-foreground text-sm ml-2">
-                        {pos.quantity} shares @ ${pos.entry_price.toFixed(2)}
+                        {pos.quantity} sh @ ${pos.entry_price.toFixed(2)}
                       </span>
+                      {pos.scale_out_stage > 0 && (
+                        <span className={`text-xs ml-2 font-medium ${STAGE_LABELS[pos.scale_out_stage]?.color}`}>
+                          · {STAGE_LABELS[pos.scale_out_stage]?.label}
+                        </span>
+                      )}
                     </div>
                     <div className="text-right">
                       <PnlBadge pnl={pnl} />
@@ -264,16 +280,33 @@ export default function PortfolioPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>Current: <strong className="text-foreground">${(pos.current_price ?? pos.entry_price).toFixed(2)}</strong></span>
-                    {pos.stop_loss_price && <span className="text-red-400">SL: ${pos.stop_loss_price.toFixed(2)}</span>}
-                    {pos.take_profit_price && <span className="text-green-400">TP: ${pos.take_profit_price.toFixed(2)}</span>}
+                    {pos.stop_loss_price && (
+                      <span className="text-red-400">
+                        SL: ${pos.stop_loss_price.toFixed(2)}
+                        {pos.stop_loss_method && pos.scale_out_stage >= 1 && (
+                          <span className="text-muted-foreground ml-1">({pos.stop_loss_method})</span>
+                        )}
+                      </span>
+                    )}
+                    {pos.take_profit_price && pos.scale_out_stage === 0 && (
+                      <span className="text-green-400">T1: ${pos.take_profit_price.toFixed(2)}</span>
+                    )}
+                    {pos.target2_price && pos.scale_out_stage <= 1 && (
+                      <span className="text-green-300/70">T2: ${pos.target2_price.toFixed(2)}</span>
+                    )}
+                    {pos.partial_realized_pnl != null && pos.partial_realized_pnl !== 0 && (
+                      <span className={pos.partial_realized_pnl >= 0 ? "text-green-400" : "text-red-400"}>
+                        Partial: {pos.partial_realized_pnl >= 0 ? "+" : ""}${pos.partial_realized_pnl.toFixed(2)} locked
+                      </span>
+                    )}
                   </div>
                   <RProgress
                     current={pos.current_price}
                     entry={pos.entry_price}
                     stop={pos.stop_loss_price}
-                    target={pos.take_profit_price}
+                    target={pos.scale_out_stage === 0 ? pos.take_profit_price : pos.target2_price}
                   />
                 </div>
               );
@@ -306,8 +339,13 @@ export default function PortfolioPage() {
                       <span className="text-muted-foreground text-xs ml-2">
                         {pos.quantity}sh @ ${pos.entry_price.toFixed(2)} → ${(pos.exit_price ?? pos.entry_price).toFixed(2)}
                       </span>
-                      <div className="mt-0.5">
+                      <div className="mt-0.5 flex flex-wrap gap-1">
                         <CloseReasonBadge reason={pos.close_reason} />
+                        {pos.scale_out_stage > 0 && (
+                          <span className="text-xs bg-purple-500/10 text-purple-300 border border-purple-500/20 px-1.5 py-0.5 rounded">
+                            {pos.scale_out_stage === 1 ? "T1 closed" : "T1+T2 closed"}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

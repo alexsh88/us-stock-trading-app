@@ -21,10 +21,14 @@ class PositionResponse(BaseModel):
     quantity: int
     entry_price: float
     stop_loss_price: Optional[float] = None
+    stop_loss_method: Optional[str] = None
     take_profit_price: Optional[float] = None
+    target2_price: Optional[float] = None
+    scale_out_stage: int = 0
+    partial_realized_pnl: Optional[float] = None
     current_price: Optional[float] = None
     exit_price: Optional[float] = None
-    close_reason: Optional[str] = None  # stop_loss | take_profit | manual
+    close_reason: Optional[str] = None
     status: str
     is_paper: bool
     unrealized_pnl: Optional[float] = None
@@ -43,4 +47,5 @@ class OpenPositionRequest(BaseModel):
     entry_price: float
     stop_loss_price: Optional[float] = None
     take_profit_price: Optional[float] = None
+    target2_price: Optional[float] = None
     is_paper: bool = True

@@ -81,8 +81,10 @@ async def get_portfolio_summary(
             r_multiples.append(pnl / risk)
 
     avg_r_multiple = round(sum(r_multiples) / len(r_multiples), 2) if r_multiples else None
-    stop_loss_hits = sum(1 for p in closed_positions if p.close_reason == "stop_loss")
-    take_profit_hits = sum(1 for p in closed_positions if p.close_reason == "take_profit")
+    _stop_reasons = {"stop_loss", "stop_loss_after_t1", "trailing_stop"}
+    _tp_reasons = {"take_profit"}
+    stop_loss_hits = sum(1 for p in closed_positions if p.close_reason in _stop_reasons)
+    take_profit_hits = sum(1 for p in closed_positions if p.close_reason in _tp_reasons)
 
     return {
         "portfolio_id": str(portfolio_id),

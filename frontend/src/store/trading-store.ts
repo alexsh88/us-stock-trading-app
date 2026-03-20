@@ -57,6 +57,10 @@ export interface TradeSignal {
   indicators?: TechnicalIndicators | null;
   key_risks: string[];
   reasoning?: string | null;
+  detected_patterns?: {
+    best_bullish?: { name: string; strength: number; pivot?: number } | null;
+    best_bearish?: { name: string; strength: number; pivot?: number } | null;
+  } | null;
   is_paper: boolean;
   created_at: string;
 }

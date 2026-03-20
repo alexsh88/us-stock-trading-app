@@ -9,6 +9,22 @@ interface Props {
   onPaperTrade?: (signal: TradeSignal) => void;
 }
 
+const PATTERN_LABELS: Record<string, string> = {
+  cup_handle:        "Cup & Handle",
+  bull_flag:         "Bull Flag",
+  double_bottom:     "Double Bottom",
+  ascending_triangle: "Asc. Triangle",
+  vcp:               "VCP",
+  head_shoulders_inv: "Inv H&S",
+  descending_triangle: "Desc. Triangle",
+};
+
+const GAP_STYLES: Record<string, string> = {
+  breakaway:  "bg-green-500/15 text-green-400 border-green-500/25",
+  exhaustion: "bg-red-500/15 text-red-400 border-red-500/25",
+  common:     "bg-secondary text-muted-foreground border-border",
+};
+
 export function SignalCard({ signal, onPaperTrade }: Props) {
   const isBuy = signal.decision === "BUY";
   const isSell = signal.decision === "SELL";
@@ -21,6 +37,11 @@ export function SignalCard({ signal, onPaperTrade }: Props) {
 
   const DecisionIcon = isBuy ? TrendingUp : isSell ? TrendingDown : Minus;
   const confidencePct = Math.round(signal.confidence_score * 100);
+
+  const patternName = signal.detected_patterns?.best_bullish?.name;
+  const patternLabel = patternName ? PATTERN_LABELS[patternName] ?? patternName : null;
+  const gapType = signal.indicators?.gap_type;
+  const showGapBadge = gapType && gapType !== "none" && gapType !== "common";
 
   return (
     <div className="bg-card border border-border rounded-lg p-4 hover:border-primary/50 transition-colors">
@@ -52,6 +73,22 @@ export function SignalCard({ signal, onPaperTrade }: Props) {
         </div>
       </div>
 
+      {/* Pattern + gap badges */}
+      {(patternLabel || showGapBadge) && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {patternLabel && (
+            <span className="text-xs bg-purple-500/15 text-purple-300 border border-purple-500/25 px-2 py-0.5 rounded font-medium">
+              {patternLabel}
+            </span>
+          )}
+          {showGapBadge && (
+            <span className={`text-xs border px-2 py-0.5 rounded font-medium ${GAP_STYLES[gapType!] ?? GAP_STYLES.common}`}>
+              {gapType === "breakaway" ? "Breakaway Gap ↑" : "Exhaustion Gap ↓"}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Price levels */}
       <div className="grid grid-cols-3 gap-2 mb-3 text-center">
         <div className="bg-secondary rounded p-2">
@@ -63,8 +100,11 @@ export function SignalCard({ signal, onPaperTrade }: Props) {
           <p className="text-sm font-semibold text-red-400">${signal.stop_loss_price?.toFixed(2)}</p>
         </div>
         <div className="bg-green-500/5 border border-green-500/20 rounded p-2">
-          <p className="text-xs text-green-400">Target</p>
+          <p className="text-xs text-green-400">T1</p>
           <p className="text-sm font-semibold text-green-400">${signal.take_profit_price?.toFixed(2)}</p>
+          {signal.take_profit_price_2 && (
+            <p className="text-xs text-green-300/60 mt-0.5">T2 ${signal.take_profit_price_2.toFixed(2)}</p>
+          )}
         </div>
       </div>
 

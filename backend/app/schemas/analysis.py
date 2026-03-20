@@ -69,6 +69,7 @@ class TradeSignalResponse(BaseModel):
     indicators: Optional[TechnicalIndicators] = None
     key_risks: list[str] = []
     reasoning: Optional[str] = None
+    detected_patterns: Optional[dict] = None
     is_paper: bool = True
     created_at: datetime
 
@@ -103,6 +104,7 @@ class TradeSignalResponse(BaseModel):
             indicators=ind,
             key_risks=s.key_risks or [],
             reasoning=s.reasoning,
+            detected_patterns=s.detected_patterns,
             is_paper=s.is_paper,
             created_at=s.created_at,
         )
