@@ -57,6 +57,14 @@ function formatStopReason(method: string | null | undefined): { label: string; d
     const mult = method.match(/ATR-([\d.]+)x/)?.[1] ?? "2";
     return { label: `ATR ${mult}× stop`, detail: `${mult}× the average true range below entry — widens in volatile markets, tightens in calm ones` };
   }
+  // AVWAP: "AVWAP($261.39)"
+  if (method.startsWith("AVWAP")) {
+    const price = method.match(/\$([\d.]+)/)?.[1];
+    return {
+      label: "Anchored VWAP",
+      detail: `VWAP anchored to the most recent swing low${price ? ` at $${price}` : ""} — price above AVWAP = bullish structure intact; stop just below it`,
+    };
+  }
   // Pattern invalidation: "double_bottom-invalidation(str=0.72)"
   const patMatch = method.match(/^(.+)-invalidation\(str=([\d.]+)\)$/);
   if (patMatch) {
@@ -81,6 +89,7 @@ function formatTargetReason(method: string | null | undefined, rr: number | null
   if (method === "Fib162") return { label: "Fib 1.618× extension", detail: "Golden ratio extension — strong institutional target, often marks end of an impulsive move" };
   if (method === "WeeklyR1") return { label: "Weekly R1 pivot", detail: "First weekly resistance (PP×2 − prior low) — self-fulfilling level widely watched by institutions" };
   if (method === "WeeklyR2") return { label: "Weekly R2 pivot", detail: "Second weekly resistance (PP + prior range) — extended target for strong trending moves" };
+  if (method === "VolumeProfileVAH") return { label: "Volume Profile VAH", detail: "Value Area High — upper boundary of the zone holding 70% of recent volume; strong institutional supply cluster" };
   if (method === "ClusteredResist") return { label: "Clustered resistance", detail: "Price zone with multiple prior pivot highs — the strongest nearby supply area" };
   if (method === "SwingResist") return { label: "Swing resistance", detail: "Most recent pivot high on the daily chart" };
   return { label: method, detail: "" };
@@ -187,6 +196,87 @@ function IndicatorsPanel({ ind }: { ind: TechnicalIndicators }) {
               Support <span className="text-green-400 font-medium">${ind.swing_support.toFixed(2)}</span>
             </span>
           )}
+        </div>
+      )}
+
+      {/* Volume Profile */}
+      {(ind.vpoc != null || ind.val != null || ind.vah != null) && (
+        <div className="border-t border-border pt-3">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Volume Profile</p>
+          <div className="flex flex-wrap gap-4 text-sm">
+            {ind.vah != null && (
+              <span className="text-muted-foreground">VAH <span className="text-red-400 font-medium">${ind.vah.toFixed(2)}</span></span>
+            )}
+            {ind.vpoc != null && (
+              <span className="text-muted-foreground">VPOC <span className="text-foreground font-medium">${ind.vpoc.toFixed(2)}</span></span>
+            )}
+            {ind.val != null && (
+              <span className="text-muted-foreground">VAL <span className="text-green-400 font-medium">${ind.val.toFixed(2)}</span></span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* AVWAP */}
+      {ind.avwap != null && (
+        <div className="border-t border-border pt-3">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Anchored VWAP</p>
+          <div className="flex flex-wrap gap-4 text-sm items-center">
+            <span className="text-muted-foreground">
+              AVWAP <span className="text-foreground font-medium">${ind.avwap.toFixed(2)}</span>
+            </span>
+            {ind.price_above_avwap != null && (
+              <span className={`text-xs px-2 py-0.5 rounded font-medium border ${
+                ind.price_above_avwap
+                  ? "bg-green-500/20 text-green-400 border-green-500/30"
+                  : "bg-red-500/20 text-red-400 border-red-500/30"
+              }`}>
+                {ind.price_above_avwap ? "Price above AVWAP ✓" : "Price below AVWAP ✗"}
+              </span>
+            )}
+            {ind.weekly_structural_stop != null && (
+              <span className="text-muted-foreground">
+                Weekly stop <span className="text-red-400 font-medium">${ind.weekly_structural_stop.toFixed(2)}</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Gap + Sizing */}
+      {(ind.gap_type != null || ind.beta != null || ind.hv_rank != null) && (
+        <div className="border-t border-border pt-3">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Market Context</p>
+          <div className="flex flex-wrap gap-2">
+            {ind.gap_type && ind.gap_type !== "none" && (
+              <span className={`text-xs px-2 py-0.5 rounded font-medium border ${
+                ind.gap_type === "breakaway" ? "bg-green-500/20 text-green-400 border-green-500/30"
+                : ind.gap_type === "exhaustion" ? "bg-red-500/20 text-red-400 border-red-500/30"
+                : "bg-secondary text-muted-foreground border-border"
+              }`}>
+                {ind.gap_type} gap {ind.gap_pct != null ? `(${ind.gap_pct > 0 ? "+" : ""}${ind.gap_pct.toFixed(1)}%)` : ""}
+              </span>
+            )}
+            {ind.beta != null && (
+              <span className="text-xs px-2 py-0.5 rounded border bg-secondary text-muted-foreground border-border">
+                β {ind.beta.toFixed(2)}
+              </span>
+            )}
+            {ind.hv_rank != null && (
+              <span className={`text-xs px-2 py-0.5 rounded font-medium border ${
+                ind.hv_rank >= 80 ? "bg-red-500/20 text-red-400 border-red-500/30"
+                : ind.hv_rank >= 40 ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+                : "bg-green-500/20 text-green-400 border-green-500/30"
+              }`}>
+                HV {ind.hv_rank.toFixed(0)}th pct
+              </span>
+            )}
+            {ind.regime_sizing != null && ind.regime_sizing < 1.0 && (
+              <span className="text-xs px-2 py-0.5 rounded border bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                Regime ×{ind.regime_sizing.toFixed(2)}
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -24,6 +24,19 @@ export interface TechnicalIndicators {
   vwap_relation?: string | null;
   stop_loss_method?: string | null;
   target_method?: string | null;
+  // Phase 3 fields
+  avwap?: number | null;
+  avwap_stop?: number | null;
+  price_above_avwap?: boolean | null;
+  vpoc?: number | null;
+  val?: number | null;
+  vah?: number | null;
+  weekly_structural_stop?: number | null;
+  gap_type?: "breakaway" | "exhaustion" | "common" | "none" | null;
+  gap_pct?: number | null;
+  beta?: number | null;
+  hv_rank?: number | null;
+  regime_sizing?: number | null;
 }
 
 export interface TradeSignal {

@@ -658,6 +658,20 @@ export default function GuidePage() {
           (&gt;1.5% after an extended trend, with high volume) fills 75% of the time — penalises
           confidence by −0.10. A <strong>common gap</strong> (0.3–1.5%) is treated as noise.
         </Callout>
+
+        <Callout icon={BarChart2} color="blue" title="Price structure — AVWAP, Volume Profile, Weekly swing lows">
+          Three additional stop and target levels are computed from daily OHLCV data (no extra API calls):
+          <ul className="mt-2 space-y-1 text-xs text-muted-foreground list-disc pl-4">
+            <li><strong>Anchored VWAP (AVWAP)</strong> — VWAP from the most recent swing low. When price is within
+              3% above AVWAP, it is a meaningful structural support; stop is placed 0.2% below AVWAP. Priority 1.7
+              in the stop waterfall (between Fib retracement and Chandelier Exit).</li>
+            <li><strong>Volume Profile (VPOC / VAL / VAH)</strong> — 20 price buckets over the last 60 bars.
+              VPOC is the most traded price level. VAH (Value Area High) is used as a target when it offers
+              R:R ≥ minimum. VAL marks institutional support below.</li>
+            <li><strong>Weekly structural stop</strong> — the nearest weekly swing low below current price.
+              Stronger than a daily swing low; appears in the signal&apos;s indicator panel for context.</li>
+          </ul>
+        </Callout>
       </Section>
 
       {/* ── 6. BB Squeeze ── */}
@@ -926,7 +940,7 @@ export default function GuidePage() {
               { icon: BarChart2,   label: "Fundamental Agent",  color: "text-violet-400", desc: "P/E, revenue growth, FCF yield, margins via yfinance → Haiku scores 0–1. Cached 24h." },
               { icon: TrendingUp,  label: "Sentiment Agent",    color: "text-pink-400",   desc: "Finnhub headlines + ApeWisdom Reddit mentions + StockTwits bullish/bearish ratio → Haiku scores 0–1. Cached 30min." },
               { icon: Zap,         label: "Catalyst Agent",     color: "text-orange-400", desc: "SEC EDGAR 8-K/Form 4/SC 13D filings + earnings dates + Put/Call ratio + short interest % of float (squeeze potential) → Haiku scores 0–1. Cached 4h." },
-              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop waterfall: pattern (≥0.65) → Fib retracement → Chandelier Exit → ATR. Target waterfall: pattern → Fib 1.272×/1.618× → Weekly R1/R2 → clustered resistance → min R:R floor. Kelly sizing throttled by beta (high-beta = smaller size) and HV rank. Pure math." },
+              { icon: Target,      label: "Risk Manager",       color: "text-yellow-400", desc: "Stop waterfall: pattern (≥0.65) → Fib retracement → AVWAP → Chandelier Exit → ATR. Target waterfall: pattern → Fib 1.272×/1.618× → Weekly R1/R2 → Volume Profile VAH → clustered resistance → min R:R floor. Kelly sizing throttled by beta (high-beta = smaller size), HV rank, and regime multiplier. Pure math." },
               { icon: Brain,       label: "Synthesizer",        color: "text-green-400",  desc: "All scores + regime + MTF + gap type → Claude Sonnet produces final BUY/SELL/SKIP with entry, stop, target. Sector concentration cap (max 2 per sector). Skipped entirely when bear regime (SPY < MA200×0.97 or VIX > 35). Top N returned." },
             ].map(({ icon: Icon, label, color, desc }, i, arr) => (
               <div key={label} className="flex gap-3">
