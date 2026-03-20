@@ -199,7 +199,8 @@ def _rank_sector_etfs(top_n: int = 3) -> list[str]:
     Returns top_n ETF tickers. Returns [] on any failure (caller falls back to static universe).
 
     Score = 0.6 × rs_5d + 0.4 × rs_1mo
-    Short-term (5d) weighted higher to catch fresh sector rotations early.
+    Short-term weighting catches fresh sector rotations early; keeps ETF ranking nimble.
+    Individual stock RS is measured over the full 6-month download window (longer = more stable).
     """
     try:
         download_tickers = _ALL_SECTOR_ETFS + ["SPY"]
@@ -336,8 +337,9 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
                     logger.warning("ETF rank unavailable — using static fallback universe")
 
         # Batch download all tickers — with circuit breaker fallback chain
+        # 6-month window for RS gives a more stable momentum signal (vs 1-month which is noisy)
         from app.services.data_resilience import fetch_ohlcv_with_fallback
-        all_data, data_source = fetch_ohlcv_with_fallback(all_tickers, period="1mo")
+        all_data, data_source = fetch_ohlcv_with_fallback(all_tickers, period="6mo")
         if all_data is None:
             return {"candidate_tickers": [], "market_regime": regime,
                     "errors": ["screener: all data sources failed"]}
@@ -399,17 +401,14 @@ def screener_node(state: dict[str, Any]) -> dict[str, Any]:
                 ticker_return = float((close.iloc[-1] / close.iloc[0]) - 1) if len(close) > 1 else 0.0
                 rs_vs_spy = (ticker_return - spy_return) if spy_return is not None else ticker_return
 
-                # Filter: 52-week high proximity — only stocks within 15% of 52-week high
+                # Filter: 6-month high proximity — only stocks within 18% of 6-month high
                 # (George & Hwang 2004: stocks near 52-week high have stronger momentum continuation)
-                try:
-                    hist_52w = yf.download(ticker, period="1y", interval="1d", progress=False, auto_adjust=True)
-                    high_52w = float(hist_52w["High"].max().squeeze()) if not hist_52w.empty else current_price
-                except Exception:
-                    high_52w = current_price
-                price_vs_52wk = current_price / high_52w
-                if price_vs_52wk < 0.82:  # more than 18% below 52-week high
-                    logger.debug("Skipping — too far from 52-week high", ticker=ticker,
-                                 price_vs_52wk=round(price_vs_52wk, 3))
+                # We use the 6-month high from already-downloaded data — no extra yf call needed.
+                high_6m = float(high.max()) if not high.empty else current_price
+                price_vs_52wk = current_price / high_6m
+                if price_vs_52wk < 0.82:  # more than 18% below 6-month high
+                    logger.debug("Skipping — too far from 6-month high", ticker=ticker,
+                                 price_vs_high=round(price_vs_52wk, 3))
                     continue
 
                 ticker_data[ticker] = {

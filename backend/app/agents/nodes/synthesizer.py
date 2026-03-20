@@ -399,7 +399,29 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
             else:
                 capped_signals.append(sig)  # can't compute heat, include it
 
-        top_signals = capped_signals[:top_n]
+        # ── Sector concentration cap: max 2 signals per sector ETF ──────────────
+        # Prevents correlated drawdowns when 3+ stocks from the same sector all move
+        # together on a sector-wide shock (e.g. oil inventory surprise, Fed sector rotation).
+        from app.agents.nodes.screener import ETF_SECTOR_STOCKS
+        ticker_to_sector: dict[str, str] = {
+            stock: etf
+            for etf, stocks in ETF_SECTOR_STOCKS.items()
+            for stock in stocks
+        }
+        sector_counts: dict[str, int] = {}
+        sector_capped: list[dict] = []
+        for sig in capped_signals:
+            sector = ticker_to_sector.get(sig["ticker"])
+            count = sector_counts.get(sector, 0) if sector else 0
+            if sector and count >= 2:
+                logger.info("Sector concentration cap — dropping signal",
+                            ticker=sig["ticker"], sector=sector, sector_count=count)
+                continue
+            sector_capped.append(sig)
+            if sector:
+                sector_counts[sector] = count + 1
+
+        top_signals = sector_capped[:top_n]
 
         logger.info("Synthesizer complete", signals_generated=len(top_signals),
                     heat_used=round(heat_used, 4))
