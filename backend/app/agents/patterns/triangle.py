@@ -24,7 +24,7 @@ def detect_ascending_triangle(
     high: pd.Series,
     low: pd.Series,
     volume: pd.Series,
-    lookback: int = 60,
+    lookback: int = 252,
     resistance_tolerance_pct: float = 1.5,
 ) -> PatternResult:
     not_found = PatternResult(name="ascending_triangle", detected=False, strength=0.0)
@@ -159,7 +159,7 @@ def detect_descending_triangle(
     high: pd.Series,
     low: pd.Series,
     volume: pd.Series,
-    lookback: int = 60,
+    lookback: int = 252,
     support_tolerance_pct: float = 1.5,
 ) -> PatternResult:
     """Descending triangle — bearish, used for short signals."""
