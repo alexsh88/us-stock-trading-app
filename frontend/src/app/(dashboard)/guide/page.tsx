@@ -4,7 +4,7 @@ import {
   BookOpen, PlayCircle, LayoutDashboard, LineChart, Brain,
   TrendingUp, BarChart2, Activity, Layers, ShieldCheck,
   History, Settings, ChevronRight, Info, Zap, Target,
-  AlertTriangle, CheckCircle2, Clock, Globe, Database,
+  AlertTriangle, CheckCircle2, Clock, Globe, Database, Search,
   type LucideIcon,
 } from "lucide-react";
 
@@ -102,6 +102,7 @@ export default function GuidePage() {
       <Card className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
         {[
           ["Running an Analysis", "#run"],
+          ["Quick Analysis (Lookup)", "#lookup"],
           ["Signal Cards", "#signals"],
           ["The Chart", "#chart"],
           ["ADX Regime", "#adx"],
@@ -158,6 +159,37 @@ export default function GuidePage() {
           are then filtered by price ($5–$2000), volume, ATR volatility, and RS rank. Four AI agents
           score each surviving stock in parallel — technical, fundamental, sentiment, and catalyst —
           before a synthesizer makes the final BUY/SELL/SKIP decision.
+        </Callout>
+      </Section>
+
+      {/* ── 1b. Quick Analysis ── */}
+      <Section id="lookup" icon={Search} title="Quick Analysis (Lookup)">
+        <Card className="space-y-5">
+          <p className="text-sm text-muted-foreground">
+            The <strong>Quick Analysis</strong> tab (sidebar or bottom nav) lets you type any ticker and immediately run the full AI pipeline on it — without touching the batch flow or the dashboard.
+          </p>
+          <div className="space-y-4">
+            <Step n={1} title="Enter a ticker and choose mode">
+              Type any valid US ticker (e.g. <code className="bg-secondary px-1 rounded text-xs">MSFT</code>) and pick Swing or Intraday. Your last 5 lookups are saved as quick-access chips.
+            </Step>
+            <Step n={2} title="Click Analyze and wait ~60–90 seconds">
+              The full pipeline runs on just that one stock — same agents, same scoring, same synthesis as the batch flow. A spinner shows while it runs.
+            </Step>
+            <Step n={3} title="Always get a result — BUY, SELL, or NOT NOW">
+              Unlike the dashboard which only shows passing signals, Quick Analysis always returns a full breakdown regardless of decision. If it&apos;s a skip, you see exactly which factor(s) dragged it below threshold and what would need to change.
+            </Step>
+            <Step n={4} title="Click 'Analyze another' to reset">
+              The page resets to idle so you can look up the next ticker. Your previous results are not saved anywhere — lookups are intentionally ephemeral.
+            </Step>
+          </div>
+        </Card>
+
+        <Callout icon={Info} color="indigo" title="Dashboard isolation">
+          Quick Analysis runs are completely invisible to the Dashboard. The &ldquo;/latest&rdquo; endpoint used by the dashboard automatically filters out single-ticker lookups, so running a lookup never displaces your last batch result.
+        </Callout>
+
+        <Callout icon={AlertTriangle} color="yellow" title="No paper trade button">
+          Quick Analysis is a research tool only. There is no paper-trade button on this page by design — use the Dashboard signals for paper trading.
         </Callout>
       </Section>
 

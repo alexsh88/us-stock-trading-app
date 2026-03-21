@@ -34,11 +34,12 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
             try:
                 import finnhub
                 import statistics
+                from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
                 fh = finnhub.Client(api_key=get_settings().finnhub_api_key)
-                for ticker in tickers:
+
+                def _fetch_sue(ticker: str) -> tuple[str, dict]:
                     result: dict = {"sue": None, "eps_revision_pct": None}
                     try:
-                        # SUE = (actual - estimate) / std_dev_of_last_4_surprises
                         earnings = fh.company_earnings(ticker, limit=5)
                         if earnings and len(earnings) >= 1:
                             latest = earnings[0]
@@ -54,11 +55,9 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
                                     std = statistics.stdev(surprises)
                                     result["sue"] = round((actual - estimate) / std, 2) if std > 0 else None
                                 elif surprises:
-                                    # fallback: raw surprise % / 10 as proxy
                                     sp = latest.get("surprisePercent")
                                     result["sue"] = round(sp / 10.0, 2) if sp is not None else None
 
-                        # EPS revision direction: revsUp vs revsDown from consensus estimates
                         estimates = fh.earnings_estimates(ticker, freq="quarterly")
                         if estimates and estimates.get("data"):
                             row = estimates["data"][0]
@@ -69,7 +68,13 @@ def fundamental_node(state: dict[str, Any]) -> dict[str, Any]:
                                 result["eps_revision_pct"] = round((revs_up - revs_down) / total * 100, 1)
                     except Exception:
                         pass
-                    sue_data[ticker] = result
+                    return ticker, result
+
+                with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as _ex:
+                    _futs = {_ex.submit(_fetch_sue, t): t for t in tickers}
+                    for _f in _as_completed(_futs):
+                        _ticker, _result = _f.result()
+                        sue_data[_ticker] = _result
             except Exception:
                 pass
 

@@ -77,12 +77,15 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
         except Exception as e:
             logger.warning("ApeWisdom fetch failed", error=str(e))
 
-        # Fetch StockTwits sentiment (no API key, ~200/hr limit)
+        # Fetch StockTwits sentiment in parallel (no API key, ~200/hr limit)
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
         stocktwits_data: dict[str, dict] = {}
-        for ticker in tickers:
-            st = _fetch_stocktwits(ticker)
-            if st:
-                stocktwits_data[ticker] = st
+        with ThreadPoolExecutor(max_workers=min(10, len(tickers))) as _ex:
+            _futs = {_ex.submit(_fetch_stocktwits, t): t for t in tickers}
+            for _f in _as_completed(_futs):
+                _st = _f.result()
+                if _st:
+                    stocktwits_data[_futs[_f]] = _st
 
         # Fetch IBKR news headlines (free providers: Briefing.com + Dow Jones)
         ibkr_headlines: dict[str, list[str]] = {}
@@ -98,9 +101,9 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
         if has_finnhub_key():
             date_to = date.today().isoformat()
             date_from = (date.today() - timedelta(days=5)).isoformat()
-            for ticker in tickers:
+
+            def _fetch_finnhub_news(ticker: str) -> tuple[str, dict]:
                 try:
-                    # company-news gives actual headlines; news-sentiment gives aggregate bullishPercent
                     url_news = (
                         f"https://finnhub.io/api/v1/company-news?symbol={ticker}"
                         f"&from={date_from}&to={date_to}&token={settings.finnhub_api_key}"
@@ -108,23 +111,25 @@ def sentiment_node(state: dict[str, Any]) -> dict[str, Any]:
                     resp_news = httpx.get(url_news, timeout=10)
                     headlines: list[str] = []
                     if resp_news.status_code == 200:
-                        articles = resp_news.json()[:5]  # top 5 most recent
+                        articles = resp_news.json()[:5]
                         headlines = [a.get("headline", "") for a in articles if a.get("headline")]
 
-                    # Also get aggregate sentiment as a secondary signal
                     url_sent = f"https://finnhub.io/api/v1/news-sentiment?symbol={ticker}&token={settings.finnhub_api_key}"
                     resp_sent = httpx.get(url_sent, timeout=10)
                     bullish_pct = 0.5
                     if resp_sent.status_code == 200:
                         bullish_pct = resp_sent.json().get("sentiment", {}).get("bullishPercent", 0.5)
 
-                    news_data[ticker] = {
-                        "headlines": headlines,
-                        "bullish_pct": bullish_pct,
-                        "sentiment_delta": bullish_pct - 0.5,
-                    }
+                    return ticker, {"headlines": headlines, "bullish_pct": bullish_pct, "sentiment_delta": bullish_pct - 0.5}
                 except Exception:
-                    pass
+                    return ticker, {}
+
+            with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as _ex:
+                _futs = {_ex.submit(_fetch_finnhub_news, t): t for t in tickers}
+                for _f in _as_completed(_futs):
+                    _ticker, _entry = _f.result()
+                    if _entry:
+                        news_data[_ticker] = _entry
 
         # --- Redis cache: split tickers into cached vs uncached ---
         from app.agents.cache_utils import score_get, score_set

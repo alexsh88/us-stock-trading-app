@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { TrendingUp, Briefcase, Settings, BarChart3, BookOpen, Activity } from "lucide-react";
+import { TrendingUp, Briefcase, Settings, BarChart3, BookOpen, Activity, Search } from "lucide-react";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: TrendingUp },
   { href: "/portfolio", label: "Portfolio", icon: Briefcase },
   { href: "/performance", label: "Performance", icon: Activity },
+  { href: "/lookup", label: "Quick Analysis", icon: Search },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/guide", label: "How It Works", icon: BookOpen },
 ];

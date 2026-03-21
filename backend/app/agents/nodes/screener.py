@@ -250,9 +250,10 @@ def _rank_sector_etfs(top_n: int = 3) -> list[str]:
 
 
 def _get_earnings_dates(tickers: list[str]) -> dict[str, date | None]:
-    """Fetch next earnings date for each ticker. Returns {ticker: date or None}."""
-    earnings_dates: dict[str, date | None] = {}
-    for ticker in tickers:
+    """Fetch next earnings date for each ticker in parallel. Returns {ticker: date or None}."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch_one(ticker: str) -> tuple[str, date | None]:
         try:
             t = yf.Ticker(ticker)
             cal = t.calendar
@@ -261,11 +262,17 @@ def _get_earnings_dates(tickers: list[str]) -> dict[str, date | None]:
                 if hasattr(ed, "__iter__") and not isinstance(ed, str):
                     ed = list(ed)[0] if ed else None
                 if ed is not None:
-                    earnings_dates[ticker] = pd.Timestamp(ed).date()
-                    continue
+                    return ticker, pd.Timestamp(ed).date()
         except Exception:
             pass
-        earnings_dates[ticker] = None
+        return ticker, None
+
+    earnings_dates: dict[str, date | None] = {}
+    with ThreadPoolExecutor(max_workers=min(12, len(tickers))) as executor:
+        futures = {executor.submit(_fetch_one, t): t for t in tickers}
+        for future in as_completed(futures):
+            ticker, d = future.result()
+            earnings_dates[ticker] = d
     return earnings_dates
 
 

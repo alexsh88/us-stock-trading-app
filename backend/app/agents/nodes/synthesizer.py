@@ -137,25 +137,71 @@ def _build_ticker_block(ticker: str, state: dict[str, Any], current_price: float
     )
 
 
-def _parse_batch_response(text: str, state: dict[str, Any], prices: dict[str, float]) -> list[dict[str, Any]]:
+def _parse_batch_response(text: str, state: dict[str, Any], prices: dict[str, float]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Parse LLM response. Returns (actionable_signals, hold_signals).
+    hold_signals captures SKIP decisions and sub-threshold scores so the UI
+    can explain *why* a ticker was skipped instead of showing a blank page.
+    """
     import re
 
     signals = []
+    hold_signals = []
     for line in text.strip().split("\n"):
         line = line.strip()
         if not line or "|" not in line:
             continue
         parts = line.split("|")
-        if len(parts) < 8:
-            continue
         try:
             ticker = parts[0].strip().upper()
-            decision = parts[1].strip().upper()
-            if decision not in ("BUY", "SELL"):
+            decision = parts[1].strip().upper() if len(parts) > 1 else ""
+
+            confidence_nums = re.findall(r"\d+\.?\d*", parts[2]) if len(parts) > 2 else []
+            confidence = float(confidence_nums[0]) if confidence_nums else 0.0
+
+            tech = state.get("technical_scores", {}).get(ticker, {})
+            fund = state.get("fundamental_scores", {}).get(ticker, {})
+            sent = state.get("sentiment_scores", {}).get(ticker, {})
+            cat = state.get("catalyst_scores", {}).get(ticker, {})
+            risk = state.get("risk_metrics", {}).get(ticker, {})
+
+            # Capture SKIP / low-confidence as HOLD — check BEFORE the len(parts) < 8 guard
+            # because the LLM sometimes emits short SKIP lines (fewer than 8 fields)
+            if decision == "SKIP" or (decision in ("BUY", "SELL") and confidence < 0.60):
+                reasoning = parts[7].strip()[:400] if len(parts) >= 8 else "Skipped by AI — below confidence threshold"
+                risks = [r.strip() for r in parts[6].split(";") if r.strip()][:2] if len(parts) >= 7 else []
+                from app.agents.patterns.detector import pattern_to_dict
+                pat_results = tech.get("_pattern_results", {})
+                hold_signals.append({
+                    "ticker": ticker,
+                    "decision": "HOLD",
+                    "confidence_score": round(min(max(confidence, 0.0), 1.0), 4),
+                    "trading_mode": state.get("mode", "swing"),
+                    "entry_price": None,
+                    "stop_loss_price": None,
+                    "stop_loss_method": None,
+                    "target_method": None,
+                    "take_profit_price": None,
+                    "take_profit_price_2": None,
+                    "risk_reward_ratio": None,
+                    "position_size_pct": 0.0,
+                    "technical_score": tech.get("score", 0.5),
+                    "fundamental_score": fund.get("score", 0.5),
+                    "sentiment_score": sent.get("score", 0.5),
+                    "catalyst_score": cat.get("score", 0.5),
+                    "key_risks": risks,
+                    "reasoning": reasoning,
+                    "detected_patterns": {
+                        "best_bullish": pattern_to_dict(pat_results["best_bullish"]) if pat_results.get("best_bullish") else None,
+                        "best_bearish": pattern_to_dict(pat_results["best_bearish"]) if pat_results.get("best_bearish") else None,
+                        "all_bullish": [pattern_to_dict(r) for r in pat_results.get("all_bullish", [])],
+                        "all_bearish": [pattern_to_dict(r) for r in pat_results.get("all_bearish", [])],
+                    },
+                })
                 continue
 
-            confidence = float(re.findall(r"\d+\.?\d*", parts[2])[0])
-            if confidence < 0.60:
+            if decision not in ("BUY", "SELL"):
+                continue
+            if len(parts) < 8:
                 continue
 
             current_price = prices.get(ticker, 100.0)
@@ -228,7 +274,7 @@ def _parse_batch_response(text: str, state: dict[str, Any], prices: dict[str, fl
         except Exception:
             continue
 
-    return signals
+    return signals, hold_signals
 
 
 def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -294,6 +340,7 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
 
         llm_ok = False
         signals = []
+        hold_signals: list[dict] = []
         if has_anthropic_key():
             try:
                 from anthropic import Anthropic
@@ -332,7 +379,9 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
                               "cache_control": {"type": "ephemeral"}}],
                     messages=[{"role": "user", "content": prompt}],
                 )
-                signals = _parse_batch_response(response.content[0].text, state, prices)
+                raw_text = response.content[0].text
+                logger.debug("Synthesizer raw LLM response", text=raw_text)
+                signals, hold_signals = _parse_batch_response(raw_text, state, prices)
                 llm_ok = True
             except Exception as e:
                 logger.warning("Synthesizer LLM call failed, falling back to rule-based", error=str(e))
@@ -429,6 +478,55 @@ def synthesizer_node(state: dict[str, Any]) -> dict[str, Any]:
                 sector_counts[sector] = count + 1
 
         top_signals = sector_capped[:top_n]
+
+        # When no actionable signals exist, show reasoning — but ONLY for single-ticker
+        # lookup runs (top_n == 1). For batch runs, preserve the original empty-list
+        # behaviour so the dashboard is never polluted with HOLD signals that have
+        # null prices and would break signal card rendering.
+        if not top_signals and top_n == 1:
+            if hold_signals:
+                top_signals = hold_signals[:top_n]
+                logger.info("No actionable signals — returning HOLD signals with reasoning",
+                            hold_count=len(top_signals))
+            else:
+                # Build HOLD signals from factor scores so the UI never shows a blank page
+                from app.agents.patterns.detector import pattern_to_dict
+                for ticker in top_candidates[:top_n]:
+                    tech = state.get("technical_scores", {}).get(ticker, {})
+                    fund = state.get("fundamental_scores", {}).get(ticker, {})
+                    sent = state.get("sentiment_scores", {}).get(ticker, {})
+                    cat  = state.get("catalyst_scores",  {}).get(ticker, {})
+                    comp = composite_score(ticker)
+                    pat_results = tech.get("_pattern_results", {})
+                    top_signals.append({
+                        "ticker": ticker,
+                        "decision": "HOLD",
+                        "confidence_score": round(comp, 4),
+                        "trading_mode": mode,
+                        "entry_price": None,
+                        "stop_loss_price": None,
+                        "stop_loss_method": None,
+                        "target_method": None,
+                        "take_profit_price": None,
+                        "take_profit_price_2": None,
+                        "risk_reward_ratio": None,
+                        "position_size_pct": 0.0,
+                        "technical_score": tech.get("score", 0.5),
+                        "fundamental_score": fund.get("score", 0.5),
+                        "sentiment_score": sent.get("score", 0.5),
+                        "catalyst_score": cat.get("score", 0.5),
+                        "key_risks": [],
+                        "reasoning": f"Setup scored below the 0.60 confidence threshold (composite={comp:.2f}). Technical={tech.get('score',0.5):.2f}, Fundamental={fund.get('score',0.5):.2f}, Sentiment={sent.get('score',0.5):.2f}, Catalyst={cat.get('score',0.5):.2f}.",
+                        "detected_patterns": {
+                            "best_bullish": pattern_to_dict(pat_results["best_bullish"]) if pat_results.get("best_bullish") else None,
+                            "best_bearish": pattern_to_dict(pat_results["best_bearish"]) if pat_results.get("best_bearish") else None,
+                            "all_bullish": [pattern_to_dict(r) for r in pat_results.get("all_bullish", [])],
+                            "all_bearish": [pattern_to_dict(r) for r in pat_results.get("all_bearish", [])],
+                        },
+                    })
+                if top_signals:
+                    logger.info("No actionable signals — returning score-based HOLD signals",
+                                hold_count=len(top_signals))
 
         logger.info("Synthesizer complete", signals_generated=len(top_signals),
                     heat_used=round(heat_used, 4))

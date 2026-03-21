@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { TrendingUp, Briefcase, Settings, BookOpen, Activity } from "lucide-react";
+import { TrendingUp, Briefcase, Settings, Activity, Search } from "lucide-react";
 
 const nav = [
   { href: "/", label: "Signals", icon: TrendingUp },
   { href: "/portfolio", label: "Portfolio", icon: Briefcase },
+  { href: "/lookup", label: "Lookup", icon: Search },
   { href: "/performance", label: "Perf.", icon: Activity },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
