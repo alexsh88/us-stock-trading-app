@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Settings, Save, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Settings, Save, ChevronDown, ChevronUp, Wifi, WifiOff, RefreshCw } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -37,22 +37,28 @@ interface AppSettings {
   top_n: number;
   trading_mode: string;
   paper_trading: boolean;
+  ibkr_enabled: boolean;
   watchlist: string;
   sector_top_n: number;
   pinned_sectors: string[];
 }
+
+type IbkrStatus = { enabled: boolean; connected: boolean; port: number; error: string | null } | null;
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>({
     top_n: 5,
     trading_mode: "swing",
     paper_trading: true,
+    ibkr_enabled: false,
     watchlist: "",
     sector_top_n: 3,
     pinned_sectors: [],
   });
   const [saved, setSaved] = useState(false);
   const [sectorOpen, setSectorOpen] = useState(false);
+  const [ibkrStatus, setIbkrStatus] = useState<IbkrStatus>(null);
+  const [ibkrTesting, setIbkrTesting] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/settings/`)
@@ -60,6 +66,7 @@ export default function SettingsPage() {
       .then((data) =>
         setSettings({
           ...data,
+          ibkr_enabled: data.ibkr_enabled ?? false,
           watchlist: data.watchlist ?? "",
           sector_top_n: data.sector_top_n ?? 3,
           pinned_sectors: data.pinned_sectors ?? [],
@@ -76,6 +83,19 @@ export default function SettingsPage() {
         : [...prev.pinned_sectors, etf],
     }));
   };
+
+  const testIbkrConnection = useCallback(async () => {
+    setIbkrTesting(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/trades/ibkr/status`);
+      const data = await res.json();
+      setIbkrStatus(data);
+    } catch {
+      setIbkrStatus({ enabled: false, connected: false, port: 7497, error: "Could not reach backend" });
+    } finally {
+      setIbkrTesting(false);
+    }
+  }, []);
 
   const save = async () => {
     await fetch(`${API_URL}/api/v1/settings/`, {
@@ -278,6 +298,70 @@ export default function SettingsPage() {
             Warning: Live trading mode will execute real orders on your IBKR account.
           </div>
         )}
+
+        {/* IBKR Connection */}
+        <div className="border-t border-border pt-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-sm font-medium">IBKR TWS Connection</label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Enable to submit real bracket orders to TWS (port 7497 paper)
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                const next = !settings.ibkr_enabled;
+                setSettings({ ...settings, ibkr_enabled: next });
+                setIbkrStatus(null);
+              }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                settings.ibkr_enabled ? "bg-green-500" : "bg-muted"
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                settings.ibkr_enabled ? "translate-x-6" : "translate-x-1"
+              }`} />
+            </button>
+          </div>
+
+          {settings.ibkr_enabled && (
+            <div className="space-y-2">
+              <button
+                onClick={testIbkrConnection}
+                disabled={ibkrTesting}
+                className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-secondary border border-border hover:bg-secondary/80 disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw className={`h-3 w-3 ${ibkrTesting ? "animate-spin" : ""}`} />
+                {ibkrTesting ? "Testing…" : "Test Connection"}
+              </button>
+
+              {ibkrStatus && (
+                <div className={`flex items-start gap-2 rounded-md p-3 text-xs ${
+                  ibkrStatus.connected
+                    ? "bg-green-500/10 border border-green-500/30 text-green-400"
+                    : "bg-red-500/10 border border-red-500/30 text-red-400"
+                }`}>
+                  {ibkrStatus.connected
+                    ? <Wifi className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    : <WifiOff className="h-3.5 w-3.5 mt-0.5 shrink-0" />}
+                  <div>
+                    {ibkrStatus.connected
+                      ? `Connected to TWS on port ${ibkrStatus.port}`
+                      : `Cannot connect to TWS on port ${ibkrStatus.port}`}
+                    {ibkrStatus.error && (
+                      <p className="text-red-300 mt-0.5">{ibkrStatus.error}</p>
+                    )}
+                    {!ibkrStatus.connected && (
+                      <p className="text-muted-foreground mt-1">
+                        Make sure TWS is open, API connections are enabled (TWS → Edit → Global Configuration → API → Settings → Enable ActiveX and Socket Clients), and port 7497 is set.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <button
           onClick={save}

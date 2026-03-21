@@ -8,12 +8,62 @@ from typing import Optional
 from datetime import datetime, timezone
 
 from app.dependencies import get_db_session
+from app.core.redis_client import get_redis
 from app.models.portfolio import Position, PositionStatus, Portfolio
 from app.models.ibkr_order import IbkrOrder, IbkrOrderType, IbkrOrderStatus
 from app.schemas.portfolio import PositionResponse, OpenPositionRequest
+from redis.asyncio import Redis
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+_SETTINGS_REDIS_KEY = "app:settings"
+
+
+async def _ibkr_enabled(redis: Redis) -> bool:
+    """Return True only if IBKR connection is enabled in persisted settings."""
+    import json
+    try:
+        raw = await redis.get(_SETTINGS_REDIS_KEY)
+        if raw:
+            data = json.loads(raw)
+            return bool(data.get("ibkr_enabled", False))
+    except Exception:
+        pass
+    return False
+
+
+# ---------------------------------------------------------------------------
+# IBKR connection status
+# ---------------------------------------------------------------------------
+
+@router.get("/ibkr/status")
+async def ibkr_connection_status(redis: Redis = Depends(get_redis)):
+    """
+    Test whether TWS is reachable and IBKR connection is enabled.
+    Returns {"enabled": bool, "connected": bool, "port": int, "error": str|null}.
+    """
+    from app.config import get_settings
+    settings = get_settings()
+    enabled = await _ibkr_enabled(redis)
+
+    if not enabled:
+        return {"enabled": False, "connected": False, "port": settings.ibkr_gateway_port, "error": None}
+
+    try:
+        from ib_async import IB
+        ib = IB()
+        ib.connect(
+            settings.ibkr_gateway_host,
+            settings.ibkr_gateway_port,
+            clientId=settings.ibkr_client_id_orders,
+            timeout=5,
+            readonly=True,
+        )
+        ib.disconnect()
+        return {"enabled": True, "connected": True, "port": settings.ibkr_gateway_port, "error": None}
+    except Exception as e:
+        return {"enabled": True, "connected": False, "port": settings.ibkr_gateway_port, "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -115,11 +165,19 @@ class BracketOrderResponse(BaseModel):
 async def submit_bracket_order(
     request: BracketOrderRequest,
     db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
 ):
     """
     Submit a real bracket order to TWS paper account for the given signal.
+    Requires IBKR connection to be enabled in Settings.
     Creates a Position + IbkrOrder rows, then places the order on TWS.
     """
+    if not await _ibkr_enabled(redis):
+        raise HTTPException(
+            status_code=403,
+            detail="IBKR connection is disabled. Enable it in Settings → IBKR Connection.",
+        )
+
     from app.models.signals import TradeSignal, TradeDecision
 
     # Load signal

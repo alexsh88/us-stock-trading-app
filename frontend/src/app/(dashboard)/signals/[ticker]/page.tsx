@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ArrowLeft, TrendingUp, TrendingDown, Minus, Info, Send, CheckCircle2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -296,6 +296,14 @@ export default function SignalDetailPage() {
   const [bracketQty, setBracketQty] = useState<number>(10);
   const [bracketOrderId, setBracketOrderId] = useState<number | null>(null);
   const [bracketError, setBracketError] = useState<string>("");
+  const [ibkrEnabled, setIbkrEnabled] = useState<boolean | null>(null); // null = loading
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/v1/trades/ibkr/status`)
+      .then((r) => r.json())
+      .then((d) => setIbkrEnabled(d.enabled))
+      .catch(() => setIbkrEnabled(false));
+  }, []);
 
   const handleSubmitBracket = useCallback(async () => {
     if (!signal) return;
@@ -421,8 +429,8 @@ export default function SignalDetailPage() {
         </div>
       )}
 
-      {/* Submit to TWS — BUY signals only */}
-      {signal.decision === "BUY" && signal.entry_price && signal.stop_loss_price && signal.take_profit_price && (
+      {/* Submit to TWS — BUY signals only, requires IBKR enabled in Settings */}
+      {signal.decision === "BUY" && signal.entry_price && signal.stop_loss_price && signal.take_profit_price && ibkrEnabled === true && (
         bracketState === "submitted" ? (
           <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 flex items-center gap-3">
             <CheckCircle2 className="h-5 w-5 text-green-400 shrink-0" />
