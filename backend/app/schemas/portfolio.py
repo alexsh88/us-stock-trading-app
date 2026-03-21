@@ -35,6 +35,10 @@ class PositionResponse(BaseModel):
     realized_pnl: Optional[float] = None
     opened_at: datetime
     closed_at: Optional[datetime] = None
+    ibkr_parent_order_id: Optional[int] = None
+    ibkr_stop_order_id: Optional[int] = None
+    ibkr_tp1_order_id: Optional[int] = None
+    ibkr_tp2_order_id: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

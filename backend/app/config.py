@@ -29,7 +29,9 @@ class Settings(BaseSettings):
     ibkr_username: str = ""
     ibkr_password: str = ""
     ibkr_gateway_host: str = "localhost"
-    ibkr_gateway_port: int = 4002
+    ibkr_gateway_port: int = 7497   # TWS paper=7497, TWS live=7496, Gateway paper=4002, Gateway live=4001
+    ibkr_client_id_data: int = 99   # read-only data services (news, scanner, fundamentals)
+    ibkr_client_id_orders: int = 1  # order placement — must differ from data client ID
 
     # Trading defaults
     default_top_n: int = 5

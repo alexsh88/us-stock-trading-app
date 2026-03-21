@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Search, TrendingUp, TrendingDown, Minus, Info, AlertTriangle, RefreshCw, XCircle } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, Minus, Info, AlertTriangle, RefreshCw, XCircle, Send, CheckCircle2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { AgentScoreBreakdown } from "@/components/signals/AgentScoreBreakdown";
 import type { TradeSignal, TechnicalIndicators } from "@/store/trading-store";
@@ -243,6 +243,7 @@ function WhyNotCard({ signal }: { signal: TradeSignal }) {
 // ── state types ───────────────────────────────────────────────────────────────
 
 type PageState = "idle" | "running" | "done" | "error";
+type BracketState = "idle" | "submitting" | "submitted" | "error";
 
 // ── main page ─────────────────────────────────────────────────────────────────
 
@@ -255,6 +256,12 @@ export default function LookupPage() {
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [recent, setRecent] = useState<string[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Bracket order state
+  const [bracketState, setBracketState] = useState<BracketState>("idle");
+  const [bracketQty, setBracketQty] = useState<number>(10);
+  const [bracketOrderId, setBracketOrderId] = useState<number | null>(null);
+  const [bracketError, setBracketError] = useState<string>("");
 
   useEffect(() => {
     try {
@@ -275,6 +282,40 @@ export default function LookupPage() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }, []);
 
+  const handleSubmitBracket = useCallback(async () => {
+    if (!signal) return;
+    setBracketState("submitting");
+    setBracketError("");
+    try {
+      // Fetch first available portfolio
+      const pfRes = await fetch(`${API_URL}/api/v1/portfolio/`);
+      if (!pfRes.ok) throw new Error("Could not load portfolios");
+      const portfolios = await pfRes.json();
+      if (!portfolios.length) throw new Error("No portfolio found — create one first");
+      const portfolioId = portfolios[0].id;
+
+      const res = await fetch(`${API_URL}/api/v1/trades/bracket`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signal_id: signal.id,
+          portfolio_id: portfolioId,
+          quantity: bracketQty,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      const result = await res.json();
+      setBracketOrderId(result.ibkr_parent_order_id);
+      setBracketState("submitted");
+    } catch (e) {
+      setBracketError(e instanceof Error ? e.message : "Submission failed");
+      setBracketState("error");
+    }
+  }, [signal, bracketQty]);
+
   const handleAnalyze = useCallback(async (tickerOverride?: string) => {
     const t = (tickerOverride ?? ticker).toUpperCase().trim();
     if (!t || !/^[A-Z]{1,6}$/.test(t)) return;
@@ -283,6 +324,9 @@ export default function LookupPage() {
     setSignal(null);
     setNoSignalTicker("");
     setErrorMsg("");
+    setBracketState("idle");
+    setBracketOrderId(null);
+    setBracketError("");
     stopPolling();
     saveRecent(t);
 
@@ -566,6 +610,60 @@ export default function LookupPage() {
               <div className="text-xs text-muted-foreground text-right max-w-[55%]">
                 After T1 is hit, 50% position remains with stop moved to breakeven. T2 exits another 25%.
               </div>
+            </div>
+          )}
+
+          {/* Submit to TWS bracket order */}
+          {bracketState === "submitted" ? (
+            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 flex items-center gap-3">
+              <CheckCircle2 className="h-5 w-5 text-green-400 shrink-0" />
+              <div>
+                <p className="font-medium text-green-400">Bracket order submitted to TWS</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Order #{bracketOrderId} · Entry limit → stop + T1 OCO live in your paper account
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-card border border-primary/20 rounded-lg p-4 space-y-3">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <Send className="h-4 w-4 text-primary" />
+                Submit bracket order to TWS (paper)
+              </p>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <label className="text-xs text-muted-foreground">Shares</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={bracketQty}
+                    onChange={(e) => setBracketQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 mt-1"
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground space-y-0.5 pt-4">
+                  <p>Entry <span className="text-foreground font-mono">${signal.entry_price?.toFixed(2)}</span></p>
+                  <p>Stop <span className="text-red-400 font-mono">${signal.stop_loss_price?.toFixed(2)}</span></p>
+                  <p>T1 <span className="text-green-400 font-mono">${signal.take_profit_price?.toFixed(2)}</span></p>
+                </div>
+              </div>
+              {bracketState === "error" && (
+                <p className="text-xs text-red-400">{bracketError}</p>
+              )}
+              <button
+                onClick={handleSubmitBracket}
+                disabled={bracketState === "submitting"}
+                className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              >
+                {bracketState === "submitting" ? (
+                  <><RefreshCw className="h-4 w-4 animate-spin" /> Placing order…</>
+                ) : (
+                  <><Send className="h-4 w-4" /> Submit to TWS</>
+                )}
+              </button>
+              <p className="text-xs text-muted-foreground text-center">
+                Places a limit entry + stop-loss + T1 limit sell as a linked bracket on your paper account
+              </p>
             </div>
           )}
         </>

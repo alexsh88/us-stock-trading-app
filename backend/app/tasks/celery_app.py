@@ -15,6 +15,7 @@ celery_app = Celery(
         "app.tasks.backtest_tasks",
         "app.tasks.embedding_tasks",
         "app.tasks.market_data_ingest_tasks",
+        "app.tasks.ibkr_order_tasks",
     ],
 )
 
@@ -51,5 +52,10 @@ celery_app.conf.beat_schedule = {
     "nightly-ohlcv-ingest": {
         "task": "app.tasks.market_data_ingest_tasks.run_daily_ingest",
         "schedule": crontab(hour=16, minute=35, day_of_week="1-5"),  # 4:35 PM ET after market close
+    },
+    "sync-ibkr-orders": {
+        "task": "app.tasks.ibkr_order_tasks.sync_ibkr_orders_task",
+        # Every 30 seconds during market hours (Mon-Fri 9:00–16:30 ET)
+        "schedule": 30.0,
     },
 }

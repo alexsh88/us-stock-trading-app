@@ -49,6 +49,12 @@ class Position(Base):
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # IBKR TWS order tracking (None = pure paper simulation, no real TWS order)
+    ibkr_parent_order_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ibkr_stop_order_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ibkr_tp1_order_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ibkr_tp2_order_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     portfolio: Mapped["Portfolio"] = relationship("Portfolio", back_populates="positions")
 
     @property
